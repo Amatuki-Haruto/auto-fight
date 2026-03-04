@@ -3,5 +3,5 @@ services:
     name: arukemisuto-autoclick
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    startCommand: python run_server.py
     healthCheckPath: /

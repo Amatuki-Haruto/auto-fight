@@ -54,9 +54,10 @@ uvicorn app:app --reload --port 8000
 ### 2. Render にデプロイ
 
 1. [Render](https://render.com) で新規 Web サービスを作成
-2. リポジトリを接続し、`render.yaml` を使用
-3. デプロイ後、表示されるURL（例: `https://xxx.onrender.com`）を控える
-4. ローカルで `auto_click.py` 実行時に環境変数を設定：
+2. リポジトリを接続
+3. **Start Command** を `python run_server.py` に設定（または `render.yaml` を使用）
+4. デプロイ後、表示されるURL（例: `https://xxx.onrender.com`）を控える
+5. ローカルで `auto_click.py` 実行時に環境変数を設定：
    ```bash
    BACKEND_URL=https://あなたのサービス.onrender.com python3 auto_click.py
    ```
