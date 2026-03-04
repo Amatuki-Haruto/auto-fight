@@ -1,4 +1,4 @@
 # Webサーバー用（Renderデプロイ・ローカル app.py）
+# auto_click.py は requirements-local.txt を使用
 fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
-httpx>=0.24.0
