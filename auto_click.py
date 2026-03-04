@@ -343,118 +343,119 @@ async def run_loop():
 
                 count = 0
                 while True:
-                    # 停止シグナルチェック
-                    try:
-                        async with httpx.AsyncClient() as client:
-                            r = await client.get(f"{base}/api/check-stop", timeout=3.0)
-                            if r.json().get("stop"):
-                                print()
-                                print("自動探索を停止しました。ブラウザは開いたままです。")
-                                try:
-                                    async with httpx.AsyncClient() as c:
-                                        await c.post(f"{base}/api/exploration-stopped", timeout=5.0)
-                                except Exception:
-                                    pass
-                                break  # 内側ループを抜け、再度「開始」待ちへ
-                    except Exception:
-                        pass
+                    # 停止シグナルチェック（2ループ目以降のみ：初回の誤検知を防ぐ）
+                    if count > 0:
+                        try:
+                            async with httpx.AsyncClient() as client:
+                                r = await client.get(f"{base}/api/check-stop", timeout=3.0)
+                                if r.json().get("stop"):
+                                    print()
+                                    print("自動探索を停止しました。ブラウザは開いたままです。")
+                                    try:
+                                        async with httpx.AsyncClient() as c:
+                                            await c.post(f"{base}/api/exploration-stopped", timeout=5.0)
+                                    except Exception:
+                                        pass
+                                    break
+                        except Exception:
+                            pass
 
                     count += 1
-                print(f"[{count}] ループ開始")
+                    print(f"[{count}] ループ開始")
 
-                # (1.499〜1.999秒待機)
-                delay = random.uniform(WAIT_START_MIN, WAIT_START_MAX)
-                print(f"  → {delay:.3f}秒待機...")
-                await asyncio.sleep(delay)
+                    # (1.499〜1.999秒待機)
+                    delay = random.uniform(WAIT_START_MIN, WAIT_START_MAX)
+                    print(f"  → {delay:.3f}秒待機...")
+                    await asyncio.sleep(delay)
 
-                # スクロール（ホーム）
-                await _human_scroll_down(page)
+                    # スクロール（ホーム）
+                    await _human_scroll_down(page)
 
-                # (0.5〜0.999秒待機)
-                delay = random.uniform(WAIT_AFTER_HOME_SCROLL_MIN, WAIT_AFTER_HOME_SCROLL_MAX)
-                print(f"  → {delay:.3f}秒待機...")
-                await asyncio.sleep(delay)
+                    # (0.5〜0.999秒待機)
+                    delay = random.uniform(WAIT_AFTER_HOME_SCROLL_MIN, WAIT_AFTER_HOME_SCROLL_MAX)
+                    print(f"  → {delay:.3f}秒待機...")
+                    await asyncio.sleep(delay)
 
-                # 「挑戦する」(天空闘技場) があれば優先、なければ「探索する」をクリック
-                clicked = False
-                try:
-                    challenge_btn = page.locator(
-                        'input[type="submit"][value="挑戦する"]'
-                    ).first
-                    await challenge_btn.wait_for(state="visible", timeout=2000)
-                    print("  → 挑戦する（天空闘技場）をクリック")
-                    await human_like_click(page, challenge_btn)
-                    clicked = True
-                except PlaywrightTimeout:
-                    pass
-
-                if not clicked:
+                    # 「挑戦する」(天空闘技場) があれば優先、なければ「探索する」をクリック
+                    clicked = False
                     try:
-                        explore_btn = page.locator(
-                            'form[action*="monster"] input[type="submit"][value="探索する"]'
+                        challenge_btn = page.locator(
+                            'input[type="submit"][value="挑戦する"]'
                         ).first
-                        print("  → 探索するをクリック")
-                        await human_like_click(page, explore_btn)
+                        await challenge_btn.wait_for(state="visible", timeout=2000)
+                        print("  → 挑戦する（天空闘技場）をクリック")
+                        await human_like_click(page, challenge_btn)
                         clicked = True
                     except PlaywrightTimeout:
-                        print("  → 探索ボタンが見つかりません。ホームへ戻ります。")
-                        await page.goto(HOME_URL, wait_until="domcontentloaded")
+                        pass
+
+                    if not clicked:
+                        try:
+                            explore_btn = page.locator(
+                                'form[action*="monster"] input[type="submit"][value="探索する"]'
+                            ).first
+                            print("  → 探索するをクリック")
+                            await human_like_click(page, explore_btn)
+                            clicked = True
+                        except PlaywrightTimeout:
+                            print("  → 探索ボタンが見つかりません。ホームへ戻ります。")
+                            await page.goto(HOME_URL, wait_until="domcontentloaded")
+                            continue
+
+                    # ページ遷移待機（人間は読み込むまで待つ）
+                    await page.wait_for_load_state("domcontentloaded")
+                    await asyncio.sleep(random.uniform(1.2, 2.5))
+                    # たまに「考えてる」余分な待ち
+                    if random.random() < 0.06:
+                        await asyncio.sleep(random.uniform(0.8, 2.2))
+
+                    # ラッキーチャンス検知（探索/挑戦後の結果画面）
+                    if await _check_and_wait_lucky_chance(page):
+                        await _human_scroll_to_bottom(page)
+                        delay = random.uniform(
+                            WAIT_AFTER_MONSTER_SCROLL_MIN, WAIT_AFTER_MONSTER_SCROLL_MAX
+                        )
+                        await asyncio.sleep(delay)
+                        try:
+                            return_btn = page.locator(
+                                'form[action*="home"] input[type="submit"][value="街に戻る"]'
+                            ).first
+                            await human_like_click(page, return_btn)
+                        except PlaywrightTimeout:
+                            await page.goto(HOME_URL, wait_until="domcontentloaded")
                         continue
 
-                # ページ遷移待機（人間は読み込むまで待つ）
-                await page.wait_for_load_state("domcontentloaded")
-                await asyncio.sleep(random.uniform(1.2, 2.5))
-                # たまに「考えてる」余分な待ち
-                if random.random() < 0.06:
-                    await asyncio.sleep(random.uniform(0.8, 2.2))
-
-                # ラッキーチャンス検知（探索/挑戦後の結果画面）
-                if await _check_and_wait_lucky_chance(page):
+                    # 下までスクロール（モンスター画面）
                     await _human_scroll_to_bottom(page)
-                    delay = random.uniform(
-                        WAIT_AFTER_MONSTER_SCROLL_MIN, WAIT_AFTER_MONSTER_SCROLL_MAX
-                    )
+
+                    # (0.499〜1.499秒待機)
+                    delay = random.uniform(WAIT_AFTER_MONSTER_SCROLL_MIN, WAIT_AFTER_MONSTER_SCROLL_MAX)
+                    print(f"  → {delay:.3f}秒待機...")
                     await asyncio.sleep(delay)
+
+                    # 「街に戻る」ボタンをクリック
                     try:
                         return_btn = page.locator(
                             'form[action*="home"] input[type="submit"][value="街に戻る"]'
                         ).first
                         await human_like_click(page, return_btn)
                     except PlaywrightTimeout:
+                        print("  → 街に戻るボタンが見つかりません。ホームへ戻ります。")
                         await page.goto(HOME_URL, wait_until="domcontentloaded")
-                    continue
+                        continue
 
-                # 下までスクロール（モンスター画面）
-                await _human_scroll_to_bottom(page)
+                    # ページ遷移待機（ホームへ）
+                    await page.wait_for_load_state("domcontentloaded")
+                    await asyncio.sleep(random.uniform(1.2, 2.5))
 
-                # (0.499〜1.499秒待機)
-                delay = random.uniform(WAIT_AFTER_MONSTER_SCROLL_MIN, WAIT_AFTER_MONSTER_SCROLL_MAX)
-                print(f"  → {delay:.3f}秒待機...")
-                await asyncio.sleep(delay)
+                    # ラッキーチャンス検知（街に戻った後のホーム画面）
+                    if await _check_and_wait_lucky_chance(page):
+                        continue  # 20秒待ち済み、次ループで探索から開始
 
-                # 「街に戻る」ボタンをクリック
-                try:
-                    return_btn = page.locator(
-                        'form[action*="home"] input[type="submit"][value="街に戻る"]'
-                    ).first
-                    await human_like_click(page, return_btn)
-                except PlaywrightTimeout:
-                    print("  → 街に戻るボタンが見つかりません。ホームへ戻ります。")
-                    await page.goto(HOME_URL, wait_until="domcontentloaded")
-                    continue
-
-                # ページ遷移待機（ホームへ）
-                await page.wait_for_load_state("domcontentloaded")
-                await asyncio.sleep(random.uniform(1.2, 2.5))
-
-                # ラッキーチャンス検知（街に戻った後のホーム画面）
-                if await _check_and_wait_lucky_chance(page):
-                    continue  # 20秒待ち済み、次ループで探索から開始
-
-                # (20.499〜20.999秒待機) → スクロールに戻ってループ
-                delay = random.uniform(WAIT_AFTER_RETURN_MIN, WAIT_AFTER_RETURN_MAX)
-                print(f"  → {delay:.3f}秒待機...")
-                await asyncio.sleep(delay)
+                    # (20.499〜20.999秒待機) → スクロールに戻ってループ
+                    delay = random.uniform(WAIT_AFTER_RETURN_MIN, WAIT_AFTER_RETURN_MAX)
+                    print(f"  → {delay:.3f}秒待機...")
+                    await asyncio.sleep(delay)
 
         except KeyboardInterrupt:
             print("\n終了しました。")
