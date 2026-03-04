@@ -1,0 +1,4 @@
+# auto_click.py 用（ローカル実行時）
+-r requirements.txt
+playwright>=1.40.0
+playwright-stealth>=2.0.0

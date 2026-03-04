@@ -17,7 +17,7 @@ Python 3.8 以上が必要です。
 ### 2. 依存関係のインストール
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-local.txt
 playwright install chromium
 ```
 
@@ -45,7 +45,7 @@ python3 auto_click.py
 ### 1. ローカルでWebサーバーを起動（開発時）
 
 ```bash
-pip install -r requirements-render.txt
+pip install -r requirements.txt
 uvicorn app:app --reload --port 8000
 ```
 
