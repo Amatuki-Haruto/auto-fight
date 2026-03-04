@@ -3,7 +3,8 @@
 あるけみすと - ダンジョン探索の自動クリックスクリプト
 
 ・ホームで「探索する」→ モンスター画面で「街に戻る」を繰り返し
-・Web通知サーバー(app.py)と連携: ラッキーチャンス・レベル100を通知
+・Web通知サーバー(app.py)と連携: ラッキーチャンスを通知
+・自動探索終了後もブラウザは開いたまま。再度「自動探索開始」で再開可能
 """
 
 import asyncio
@@ -94,7 +95,7 @@ async def _check_and_wait_lucky_chance(page) -> bool:
         return False
 
     print()
-    print("★ ラッキーチャンスがあるよ！ Web画面のボタンを押して再開してください ★")
+    print("★ ラッキーチャンスがあるよ！ Web画面の「自動探索開始」を押して再開してください ★")
     base = BACKEND_URL.rstrip("/")
     try:
         async with httpx.AsyncClient() as client:
@@ -109,8 +110,8 @@ async def _check_and_wait_lucky_chance(page) -> bool:
             await asyncio.sleep(2)
             try:
                 async with httpx.AsyncClient() as client:
-                    r = await client.get(f"{base}/api/check-resume", timeout=5.0)
-                    if r.json().get("resume"):
+                    r = await client.get(f"{base}/api/check-go", timeout=5.0)
+                    if r.json().get("go"):
                         break
             except Exception:
                 pass
@@ -130,20 +131,6 @@ async def _check_and_wait_lucky_chance(page) -> bool:
     print("再開します。20秒後に探索から始めます。")
     await asyncio.sleep(20)
     return True
-
-
-async def _check_level_100(page) -> bool:
-    """レベル100かどうか"""
-    try:
-        return await page.evaluate(
-            """() => {
-                const c = (document.body.innerText || '') + (document.body.innerHTML || '');
-                const t = c.toUpperCase();
-                return /100\\s*[Ll][Vv]|[Ll][Vv]\\.?\\s*100|100[Ll][Vv]|[Ll][Vv]100|レベル\\s*100|100\\s*レベル/.test(t);
-            }"""
-        )
-    except Exception:
-        return False
 
 
 def _init_stealth_script():
@@ -223,26 +210,50 @@ async def run_loop():
         # ログイン後5秒待機
         await asyncio.sleep(5)
 
-        # Web画面の「自動探索開始」ボタンを待つ
+        # Web画面の「自動探索開始」で開始、 stop で停止→再度開始待ち（ブラウザは閉じない）
         base = BACKEND_URL.rstrip("/")
-        start_received = False
-        try:
-            while not start_received:
-                await asyncio.sleep(2)
-                async with httpx.AsyncClient() as client:
-                    r = await client.get(f"{base}/api/check-start", timeout=5.0)
-                    if r.json().get("start"):
-                        start_received = True
-        except Exception as e:
-            print(f"  (通知サーバーに接続できません: {e})")
-            print("  5秒後に自動で開始します...")
-            await asyncio.sleep(5)
-        print("自動探索を開始します。")
 
-        count = 0
         try:
             while True:
-                count += 1
+                # --- 開始・再開待ち ---
+                try:
+                    while True:
+                        async with httpx.AsyncClient() as client:
+                            r = await client.get(f"{base}/api/check-go", timeout=5.0)
+                            if r.json().get("go"):
+                                break
+                        await asyncio.sleep(2)
+                except Exception as e:
+                    print(f"  (通知サーバーに接続できません: {e})")
+                    print("  5秒後に自動で開始します...")
+                    await asyncio.sleep(5)
+                print("自動探索を開始します。")
+
+                try:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(f"{base}/api/exploration-started", timeout=5.0)
+                except Exception:
+                    pass
+
+                count = 0
+                while True:
+                    # 停止シグナルチェック
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            r = await client.get(f"{base}/api/check-stop", timeout=3.0)
+                            if r.json().get("stop"):
+                                print()
+                                print("自動探索を停止しました。ブラウザは開いたままです。")
+                                try:
+                                    async with httpx.AsyncClient() as c:
+                                        await c.post(f"{base}/api/exploration-stopped", timeout=5.0)
+                                except Exception:
+                                    pass
+                                break  # 内側ループを抜け、再度「開始」待ちへ
+                    except Exception:
+                        pass
+
+                    count += 1
                 print(f"[{count}] ループ開始")
 
                 # (1.499〜1.999秒待機)
@@ -338,19 +349,6 @@ async def run_loop():
                 # ラッキーチャンス検知（街に戻った後のホーム画面）
                 if await _check_and_wait_lucky_chance(page):
                     continue  # 20秒待ち済み、次ループで探索から開始
-
-                # レベル100検知（通知して停止）
-                if await _check_level_100(page):
-                    try:
-                        async with httpx.AsyncClient() as client:
-                            await client.post(
-                                f"{BACKEND_URL.rstrip('/')}/api/level-100", timeout=5.0
-                            )
-                    except Exception:
-                        pass
-                    print()
-                    print("★ レベル100に到達しました！ 自動操作を停止します。 ★")
-                    break
 
                 # (20.499〜20.999秒待機) → スクロールに戻ってループ
                 delay = random.uniform(WAIT_AFTER_RETURN_MIN, WAIT_AFTER_RETURN_MAX)
