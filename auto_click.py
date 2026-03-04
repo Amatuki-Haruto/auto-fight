@@ -193,7 +193,8 @@ async def run_loop():
         print("=" * 50)
         print("あるけみすと 自動ダンジョン探索")
         print("=" * 50)
-        print("ログインするまで待機します。ログイン後に自動で開始します。")
+        print("ログインするまで待機します。")
+        print("ログイン後、Web画面の「自動探索開始」ボタンを押してください。")
         print("終了: Ctrl+C")
         print("=" * 50)
 
@@ -211,7 +212,7 @@ async def run_loop():
                 ).first
                 await btn.wait_for(state="visible", timeout=3000)
                 logged_in = True
-                print("ログインを確認しました。5秒後に自動探索を開始します。")
+                print("ログインを確認しました。Web画面で「自動探索開始」を押すまで待機します。")
             except PlaywrightTimeout:
                 now = time.monotonic()
                 if last_msg_at == 0 or (now - last_msg_at) > 10:
@@ -219,8 +220,24 @@ async def run_loop():
                     last_msg_at = now
                 await asyncio.sleep(5)
 
-        # ログイン後5秒待ってから開始
+        # ログイン後5秒待機
         await asyncio.sleep(5)
+
+        # Web画面の「自動探索開始」ボタンを待つ
+        base = BACKEND_URL.rstrip("/")
+        start_received = False
+        try:
+            while not start_received:
+                await asyncio.sleep(2)
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(f"{base}/api/check-start", timeout=5.0)
+                    if r.json().get("start"):
+                        start_received = True
+        except Exception as e:
+            print(f"  (通知サーバーに接続できません: {e})")
+            print("  5秒後に自動で開始します...")
+            await asyncio.sleep(5)
+        print("自動探索を開始します。")
 
         count = 0
         try:

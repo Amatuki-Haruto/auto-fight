@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # グローバル状態
 resume_requested = False
+start_requested = False
 sse_clients: list = []
 
 
@@ -54,19 +55,39 @@ async def index():
     h1 { font-size: 1.25rem; }
     .status { padding: 1rem; background: #f0f0f0; border-radius: 8px; margin: 1rem 0; }
     .btn { display: block; width: 100%; padding: 1rem 1.5rem; font-size: 1rem; border: none;
-           border-radius: 8px; background: #4CAF50; color: white; cursor: pointer; margin-top: 1rem; }
-    .btn:hover { background: #45a049; }
-    .btn:disabled { background: #ccc; cursor: not-allowed; }
-    .log { font-size: 0.875rem; color: #666; margin-top: 1rem; }
+           border-radius: 8px; cursor: pointer; margin-top: 1rem; font-weight: bold; }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { background: #ccc; cursor: not-allowed; opacity: 1; }
+    .btn-primary { background: #2196F3; color: white; }
+    .btn-primary:hover { background: #1976D2; }
+    .btn-success { background: #4CAF50; color: white; }
+    .btn-success:hover { background: #45a049; }
+    .instructions { font-size: 0.9rem; color: #555; margin: 1rem 0; line-height: 1.6; }
+    .instructions code { background: #eee; padding: 0.2em 0.4em; border-radius: 4px; }
+    .section { margin: 1.5rem 0; }
   </style>
 </head>
 <body>
   <h1>あるけみすと 自動探索</h1>
   <div class="status" id="status">接続中...</div>
-  <button class="btn" id="luckyBtn" disabled>ラッキーチャンスを終了した</button>
+
+  <div class="section">
+    <p class="instructions">
+      1. ターミナルで <code>python3 auto_click.py</code> を実行<br>
+      2. ブラウザでゲームにログイン<br>
+      3. ログインできたら下のボタンを押す
+    </p>
+    <button class="btn btn-primary" id="startBtn">自動探索開始</button>
+  </div>
+
+  <div class="section">
+    <button class="btn btn-success" id="luckyBtn" disabled>ラッキーチャンスを終了した</button>
+  </div>
+
   <div class="log" id="log"></div>
   <script>
     const status = document.getElementById('status');
+    const startBtn = document.getElementById('startBtn');
     const luckyBtn = document.getElementById('luckyBtn');
     const log = document.getElementById('log');
 
@@ -81,8 +102,20 @@ async def index():
     }
 
     const es = new EventSource('/api/events');
-    es.onopen = () => { status.textContent = '接続済み'; };
+    es.onopen = () => { status.textContent = '接続済み - 自動探索の準備ができました'; };
     es.onerror = () => { status.textContent = '切断・再接続中...'; };
+
+    startBtn.addEventListener('click', async () => {
+      try {
+        await fetch('/api/start-exploration', { method: 'POST' });
+        startBtn.disabled = true;
+        startBtn.textContent = '開始シグナル送信済み';
+        status.textContent = '自動探索を開始しました';
+        addLog('自動探索開始を送信');
+      } catch (err) {
+        addLog('エラー: ' + err);
+      }
+    });
 
     es.addEventListener('lucky_chance', (e) => {
       const d = JSON.parse(e.data);
@@ -131,6 +164,24 @@ async def api_level_100():
     """ローカルスクリプトから: レベル100到達"""
     await broadcast("level_100", {"at": datetime.now().isoformat()})
     return {"ok": True}
+
+
+@app.post("/api/start-exploration")
+async def api_start_exploration():
+    """Web画面のボタン: 自動探索開始を通知"""
+    global start_requested
+    start_requested = True
+    return {"ok": True}
+
+
+@app.get("/api/check-start")
+async def api_check_start():
+    """ローカルスクリプト用: 開始シグナルを取得（1回だけTrueを返しリセット）"""
+    global start_requested
+    if start_requested:
+        start_requested = False
+        return {"start": True}
+    return {"start": False}
 
 
 @app.post("/api/lucky-chance-done")
