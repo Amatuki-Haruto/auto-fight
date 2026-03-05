@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -23,6 +24,11 @@ sse_clients: list = []
 # 探索状態（UI同期・再接続用）
 state_running: bool = False
 state_lucky: bool = False
+
+# 探索ログ（周回・メッセージ・ドロップ一覧）
+state_loop_count: int = 0
+state_last_message: str = ""
+state_drops: list[str] = []
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -68,7 +74,33 @@ def _fallback_html() -> str:
 @app.get("/api/state")
 async def api_state() -> dict:
     """現在の探索状態（再接続・初期表示の同期用）"""
-    return {"running": state_running, "lucky": state_lucky}
+    return {
+        "running": state_running,
+        "lucky": state_lucky,
+        "loop_count": state_loop_count,
+        "last_message": state_last_message,
+        "drops": state_drops.copy(),
+    }
+
+
+class ExplorationLogBody(BaseModel):
+    loop_count: int = 0
+    message: str = ""
+    drops: list[str] | None = None  # 今回のドロップ（追加される）
+
+
+@app.post("/api/exploration-log")
+async def api_exploration_log(body: ExplorationLogBody) -> dict:
+    """探索ログ受信（周回・メッセージ・ドロップ追加）"""
+    global state_loop_count, state_last_message, state_drops
+    if body.loop_count > 0:
+        state_loop_count = body.loop_count
+    if body.message:
+        state_last_message = body.message
+    if body.drops:
+        state_drops.extend(body.drops)
+    await broadcast("exploration_log", {"loop_count": state_loop_count, "message": state_last_message, "drops": state_drops.copy()})
+    return {"ok": True}
 
 
 @app.post("/api/lucky-chance")
@@ -76,7 +108,7 @@ async def api_lucky_chance() -> dict:
     global state_running, state_lucky
     state_running = False
     state_lucky = True
-    await broadcast("lucky_chance", {"at": datetime.now().isoformat()})
+    await broadcast("lucky_chance", _state_payload())
     return {"ok": True}
 
 
@@ -112,12 +144,21 @@ async def api_check_stop() -> dict:
     return {"stop": False}
 
 
+def _state_payload() -> dict:
+    return {
+        "at": datetime.now().isoformat(),
+        "loop_count": state_loop_count,
+        "message": state_last_message,
+        "drops": state_drops.copy(),
+    }
+
+
 @app.post("/api/exploration-started")
 async def api_exploration_started() -> dict:
     global state_running, state_lucky
     state_running = True
     state_lucky = False
-    await broadcast("exploration_started", {"at": datetime.now().isoformat()})
+    await broadcast("exploration_started", _state_payload())
     return {"ok": True}
 
 
@@ -126,7 +167,7 @@ async def api_exploration_stopped() -> dict:
     global state_running, state_lucky
     state_running = False
     state_lucky = False
-    await broadcast("exploration_stopped", {"at": datetime.now().isoformat()})
+    await broadcast("exploration_stopped", _state_payload())
     return {"ok": True}
 
 

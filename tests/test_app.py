@@ -67,3 +67,14 @@ def test_api_state():
     data = r.json()
     assert "running" in data
     assert "lucky" in data
+    assert "loop_count" in data
+    assert "drops" in data
+
+
+def test_exploration_log():
+    r = client.post("/api/exploration-log", json={"loop_count": 5, "message": "テスト勝利", "drops": ["弱体の種"]})
+    assert r.status_code == 200
+    r2 = client.get("/api/state")
+    assert r2.json()["loop_count"] == 5
+    assert r2.json()["last_message"] == "テスト勝利"
+    assert "弱体の種" in r2.json()["drops"]

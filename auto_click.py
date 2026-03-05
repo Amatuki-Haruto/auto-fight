@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import re
 import random
 import time
 from pathlib import Path
@@ -28,6 +29,68 @@ def _cubic_bezier(t: float, p0: float, p1: float, p2: float, p3: float) -> float
 def _log(msg: str, verbose_only: bool = False) -> None:
     if config.VERBOSE or not verbose_only:
         print(msg)
+
+
+async def _is_champion(page) -> bool:
+    """〇〇階のチャンプです → 天空闘技場行けない"""
+    try:
+        text = await page.evaluate("() => document.body.innerText")
+        return "チャンプです" in (text or "")
+    except Exception:
+        return False
+
+
+def _extract_exploration_result(text: str) -> tuple[str, list[str]]:
+    """
+    勝利メッセージ・経験値・ドロップを抽出
+    例: 「自爆餅は勝利した。13の経験値を獲得した。[C] 弱体の種を手に入れた！」
+    """
+    message = ""
+    drops: list[str] = []
+
+    # 勝利＋経験値のまとまりを取得（〇〇は勝利した。Nの経験値を獲得した。）
+    vic_exp = re.search(r"([^\n]+は勝利した[^\n]*?(\d+)\s*の経験値を獲得した[^\n]*?)(?:\n|$)", text)
+    if vic_exp:
+        message = vic_exp.group(1).strip()
+
+    # 単体でも拾う
+    if not message:
+        vic_m = re.search(r"([^\n。]+は勝利した)", text)
+        exp_m = re.search(r"(\d+)\s*の経験値を獲得した", text)
+        if vic_m:
+            message = vic_m.group(1) + "。"
+        if exp_m:
+            message += f" {exp_m.group(1)}の経験値を獲得した。"
+
+    # ドロップ: [C] アイテム名を手に入れた など（[A-Z]はランク）
+    for m in re.finditer(r"\[([A-Z])\]\s*([^を\n！]+)を手に入れた", text):
+        drops.append(f"[{m.group(1)}] {m.group(2).strip()}")
+
+    message = message.strip() or text[:300] if text else ""
+    return (message, drops)
+
+
+async def _click_and_verify(page, locator, expect_url_contains: str) -> bool:
+    """
+    クリック → 1秒待機 → 成功確認。失敗ならリトライ。
+    expect_url_contains: 成功時にURLに含まれる文字（例: "monster" または "home"）
+    """
+    for attempt in range(10):
+        await human_like_click(page, locator)
+        await asyncio.sleep(1.0)
+        try:
+            url = page.url or ""
+            if expect_url_contains in url:
+                return True
+            await page.wait_for_load_state("domcontentloaded", timeout=2000)
+            url = page.url or ""
+            if expect_url_contains in url:
+                return True
+        except Exception:
+            pass
+        _log(f"  → クリック未反映（試行{attempt+1}/10）、1秒待機後にリトライ")
+        await asyncio.sleep(1.0)
+    return False
 
 
 async def human_like_click(page, locator) -> None:
@@ -342,6 +405,10 @@ async def run_loop() -> None:
                                 f.write(str(count))
                         except Exception:
                             pass
+                        try:
+                            await http_client.post(f"{base}/api/exploration-log", json={"loop_count": count}, timeout=config.HTTP_TIMEOUT)
+                        except Exception:
+                            pass
 
                         _log(f"[{count}] ループ開始 (経過: {elapsed:.0f}秒)")
                         wmin, wmax = config.WAIT_START
@@ -353,19 +420,23 @@ async def run_loop() -> None:
                         wmin, wmax = config.WAIT_AFTER_HOME_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
 
+                        # 〇〇階のチャンプです → 天空闘技場行けないので最初に判定
+                        if await _is_champion(page):
+                            _log("  → チャンプのため天空闘技場はスキップ")
+                            challenge_btn = None
+                        else:
+                            challenge_btn = await _find_button(page, config.SELECTOR_CHALLENGE, timeout=2000)
+
                         clicked = False
-                        challenge_btn = await _find_button(page, config.SELECTOR_CHALLENGE, timeout=2000)
                         if challenge_btn:
                             _log("  → 挑戦する（天空闘技場）をクリック")
-                            await human_like_click(page, challenge_btn)
-                            clicked = True
+                            clicked = await _click_and_verify(page, challenge_btn, "monster")
 
                         if not clicked:
                             explore_btn = await _find_button(page, config.SELECTOR_EXPLORE, timeout=2000)
                             if explore_btn:
                                 _log("  → 探索するをクリック")
-                                await human_like_click(page, explore_btn)
-                                clicked = True
+                                clicked = await _click_and_verify(page, explore_btn, "monster")
                             else:
                                 _log("  → 探索ボタンが見つかりません。ホームへ戻ります。")
                                 consecutive_errors += 1
@@ -373,6 +444,11 @@ async def run_loop() -> None:
                                     _log("  ※連続エラーが多いため停止を検討してください")
                                 await _safe_goto_home(page)
                                 continue
+
+                        if not clicked:
+                            _log("  → クリックが反映されませんでした。ホームへ戻ります。")
+                            await _safe_goto_home(page)
+                            continue
 
                         consecutive_errors = 0
                         await page.wait_for_load_state("domcontentloaded")
@@ -386,7 +462,7 @@ async def run_loop() -> None:
                             await asyncio.sleep(random.uniform(wmin, wmax))
                             return_btn = await _find_button(page, config.SELECTOR_RETURN, timeout=3000)
                             if return_btn:
-                                await human_like_click(page, return_btn)
+                                await _click_and_verify(page, return_btn, "home")
                             else:
                                 await _safe_goto_home(page)
                             continue
@@ -395,13 +471,29 @@ async def run_loop() -> None:
                         wmin, wmax = config.WAIT_AFTER_MONSTER_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
 
+                        # 探索結果（勝利・経験値・ドロップ）を抽出してWebに送信
+                        try:
+                            body_text = await page.evaluate("() => document.body.innerText")
+                            msg, new_drops = _extract_exploration_result(body_text or "")
+                            if msg or new_drops:
+                                try:
+                                    await http_client.post(
+                                        f"{base}/api/exploration-log",
+                                        json={"loop_count": count, "message": msg, "drops": new_drops},
+                                        timeout=config.HTTP_TIMEOUT,
+                                    )
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+
                         return_btn = await _find_button(page, config.SELECTOR_RETURN, timeout=3000)
                         if not return_btn:
                             _log("  → 街に戻るボタンが見つかりません。ホームへ戻ります。")
                             await _safe_goto_home(page)
                             continue
 
-                        await human_like_click(page, return_btn)
+                        await _click_and_verify(page, return_btn, "home")
                         await page.wait_for_load_state("domcontentloaded")
                         await asyncio.sleep(random.uniform(0.4, 0.8))
 
