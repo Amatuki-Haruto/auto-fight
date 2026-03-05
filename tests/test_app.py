@@ -72,9 +72,11 @@ def test_api_state():
 
 
 def test_exploration_log():
-    r = client.post("/api/exploration-log", json={"loop_count": 5, "message": "テスト勝利", "drops": ["弱体の種"]})
+    r = client.post("/api/exploration-log", json={"loop_count": 5, "message": "テスト勝利", "exp": 13, "drops": ["[C] 弱体の種"]})
     assert r.status_code == 200
     r2 = client.get("/api/state")
     assert r2.json()["loop_count"] == 5
     assert r2.json()["last_message"] == "テスト勝利"
-    assert "弱体の種" in r2.json()["drops"]
+    assert r2.json()["total_exp"] == 13
+    assert "[C] 弱体の種" in r2.json()["drops"]
+    assert r2.json()["drops_by_rank"].get("C") == 1

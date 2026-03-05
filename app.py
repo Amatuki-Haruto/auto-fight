@@ -30,7 +30,14 @@ state_loop_count: int = 0
 state_last_message: str = ""
 state_drops: list[str] = []
 
+# セッション統計
+state_session_started_at: str | None = None  # ISO形式
+state_total_exp: int = 0
+state_drops_by_rank: dict[str, int] = {}  # {"S": 1, "A": 2, ...}
+state_activity_log: list[dict] = []  # 直近のアクティビティ [{loop, msg, drops, at}, ...]
+
 STATIC_DIR = Path(__file__).parent / "static"
+MAX_ACTIVITY_LOG = 20
 
 
 async def broadcast(event: str, data: dict) -> None:
@@ -80,26 +87,58 @@ async def api_state() -> dict:
         "loop_count": state_loop_count,
         "last_message": state_last_message,
         "drops": state_drops.copy(),
+        "session_started_at": state_session_started_at,
+        "total_exp": state_total_exp,
+        "drops_by_rank": state_drops_by_rank.copy(),
+        "activity_log": state_activity_log.copy(),
     }
 
 
 class ExplorationLogBody(BaseModel):
     loop_count: int = 0
     message: str = ""
+    exp: int = 0
     drops: list[str] | None = None  # 今回のドロップ（追加される）
+
+
+def _rank_from_drop(s: str) -> str:
+    """[C] 弱体の種 → C"""
+    if s.startswith("[") and "]" in s:
+        return s[1 : s.index("]")].strip().upper()
+    return "?"
 
 
 @app.post("/api/exploration-log")
 async def api_exploration_log(body: ExplorationLogBody) -> dict:
-    """探索ログ受信（周回・メッセージ・ドロップ追加）"""
-    global state_loop_count, state_last_message, state_drops
+    """探索ログ受信（周回・メッセージ・経験値・ドロップ追加）"""
+    global state_loop_count, state_last_message, state_drops, state_total_exp, state_drops_by_rank, state_activity_log
     if body.loop_count > 0:
         state_loop_count = body.loop_count
     if body.message:
         state_last_message = body.message
+    if body.exp > 0:
+        state_total_exp += body.exp
     if body.drops:
-        state_drops.extend(body.drops)
-    await broadcast("exploration_log", {"loop_count": state_loop_count, "message": state_last_message, "drops": state_drops.copy()})
+        for d in body.drops:
+            state_drops.append(d)
+            rk = _rank_from_drop(d)
+            state_drops_by_rank[rk] = state_drops_by_rank.get(rk, 0) + 1
+    if body.message or body.drops or body.exp > 0:
+        entry = {"loop": state_loop_count, "msg": body.message, "drops": body.drops or [], "exp": body.exp, "at": datetime.now().isoformat()}
+        state_activity_log.insert(0, entry)
+        state_activity_log = state_activity_log[:MAX_ACTIVITY_LOG]
+    payload = {
+        "running": state_running,
+        "lucky": state_lucky,
+        "loop_count": state_loop_count,
+        "message": state_last_message,
+        "drops": state_drops.copy(),
+        "total_exp": state_total_exp,
+        "drops_by_rank": state_drops_by_rank.copy(),
+        "activity_log": state_activity_log.copy(),
+        "session_started_at": state_session_started_at,
+    }
+    await broadcast("exploration_log", payload)
     return {"ok": True}
 
 
@@ -150,14 +189,19 @@ def _state_payload() -> dict:
         "loop_count": state_loop_count,
         "message": state_last_message,
         "drops": state_drops.copy(),
+        "session_started_at": state_session_started_at,
+        "total_exp": state_total_exp,
+        "drops_by_rank": state_drops_by_rank.copy(),
+        "activity_log": state_activity_log.copy(),
     }
 
 
 @app.post("/api/exploration-started")
 async def api_exploration_started() -> dict:
-    global state_running, state_lucky
+    global state_running, state_lucky, state_session_started_at
     state_running = True
     state_lucky = False
+    state_session_started_at = datetime.now().isoformat()
     await broadcast("exploration_started", _state_payload())
     return {"ok": True}
 

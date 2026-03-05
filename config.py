@@ -5,12 +5,22 @@
 import os
 from pathlib import Path
 
+# .env を読み込む（python-dotenv があれば）
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
 # Web通知サーバー
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 # URL
 HOME_URL = "https://games-alchemist.com/home/"
 MONSTER_URL = "https://games-alchemist.com/monster/"
+
+# クリック成功判定: 探索/挑戦後に期待するURLに含まれる文字（複数候補）
+URL_AFTER_EXPLORE = ["monster", "arena", "battle", "tower"]
 
 # パス
 USER_DATA_DIR = Path(__file__).parent / "browser_data"

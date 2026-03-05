@@ -1,89 +1,223 @@
-<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>あるけみすと 自動探索</title><style>
-:root{--bg:#0a0e14;--card:#131920;--border:#2a3441;--text:#e6edf3;--muted:#8b949e;--accent:#f0883e;--accent2:#58a6ff;--success:#3fb950;--danger:#f85149;--radius:12px;--shadow:0 8px 32px rgba(0,0,0,.4)}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>あるけみすと 自動探索</title>
+<style>
+:root{
+  --bg:#0d1117;
+  --bg2:#161b22;
+  --card:#21262d;
+  --border:#30363d;
+  --text:#e6edf3;
+  --muted:#8b949e;
+  --accent:#f0883e;
+  --accent2:#58a6ff;
+  --success:#3fb950;
+  --danger:#f85149;
+  --gold:#ffd700;
+  --silver:#c0c0c0;
+  --bronze:#cd7f32;
+  --radius:12px;
+  --shadow:0 8px 32px rgba(0,0,0,.5);
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Hiragino Sans','Yu Gothic',Meiryo,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6}
-main{max-width:420px;margin:0 auto;padding:1.5rem 1rem}
-h1{font-size:1.4rem;font-weight:700;margin-bottom:1.25rem;color:var(--text)}
+body{font-family:'Hiragino Sans','Yu Gothic',Meiryo,sans-serif;background:linear-gradient(135deg,#0d1117 0%,#161b22 50%,#0d1117 100%);color:var(--text);min-height:100vh;line-height:1.6}
+main{max-width:480px;margin:0 auto;padding:1.5rem 1rem}
+h1{font-size:1.5rem;font-weight:700;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+h1 .icon{font-size:1.8rem}
+.theme-btn{position:fixed;top:1rem;right:1rem;width:44px;height:44px;border-radius:12px;background:var(--card);border:1px solid var(--border);cursor:pointer;font-size:1.2rem;transition:transform .15s;z-index:10}
+.theme-btn:hover{transform:scale(1.08)}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow)}
-.status{display:flex;align-items:center;gap:.5rem;padding:.75rem 1rem;background:rgba(255,255,255,.04);border-radius:8px;font-size:.9rem;font-weight:500}
-.status::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted);animation:pulse 2s infinite}
+.card h2{font-size:.9rem;color:var(--muted);margin-bottom:.75rem;font-weight:600}
+.status{display:flex;align-items:center;gap:.6rem;padding:.9rem 1rem;background:rgba(255,255,255,.03);border-radius:10px;font-size:.95rem;font-weight:500}
+.status::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--muted);animation:pulse 2s infinite}
 .status.ready::before{background:var(--success)}
-.status.running::before{background:var(--accent2)}
-.status.lucky::before{background:var(--accent);animation:pulse .8s infinite}
-.status.lucky{box-shadow:0 0 0 2px rgba(240,136,62,.3)}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.steps{font-size:.8rem;color:var(--muted);margin-top:1rem;line-height:1.9}
-.steps code{background:rgba(255,255,255,.08);padding:.15em .4em;border-radius:4px;font-size:.85em}
+.status.running::before{background:var(--accent2);box-shadow:0 0 12px var(--accent2)}
+.status.lucky::before{background:var(--accent);animation:pulse .8s infinite;box-shadow:0 0 12px var(--accent)}
+.status.lucky{box-shadow:0 0 0 2px rgba(240,136,62,.4)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-top:1rem}
+.stat{background:rgba(0,0,0,.25);border-radius:10px;padding:1rem;text-align:center}
+.stat .val{font-size:1.8rem;font-weight:700;color:var(--accent2)}
+.stat .label{font-size:.75rem;color:var(--muted);margin-top:.2rem}
+.progress-wrap{margin-top:1rem;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden}
+.progress-bar{height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent));border-radius:3px;animation:progress 20s linear infinite}
+@keyframes progress{0%{width:0%}100%{width:100%}}
 .btns{display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap}
-.btn{flex:1;min-width:120px;padding:.8rem 1rem;font-size:.9rem;font-weight:600;border:none;border-radius:8px;cursor:pointer;transition:transform .15s,box-shadow .15s;font-family:inherit}
+.btn{flex:1;min-width:130px;padding:.9rem 1.1rem;font-size:.95rem;font-weight:600;border:none;border-radius:10px;cursor:pointer;transition:transform .15s,box-shadow .15s;font-family:inherit}
 .btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
 .btn-start{background:linear-gradient(135deg,var(--accent),#c76d2e);color:#fff}
-.btn-start:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(240,136,62,.3)}
+.btn-start:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 6px 20px rgba(240,136,62,.4)}
 .btn-stop{background:linear-gradient(135deg,var(--danger),#c0392b);color:#fff}
-.btn-stop:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(248,81,73,.3)}
-.theme-btn{position:fixed;top:1rem;right:1rem;width:40px;height:40px;border-radius:10px;background:var(--card);border:1px solid var(--border);cursor:pointer;font-size:1.1rem;transition:transform .15s}
-.theme-btn:hover{transform:scale(1.05)}
-.exploration-info{font-size:.8rem;color:var(--muted);margin-top:1rem;padding:.6rem;background:rgba(0,0,0,.2);border-radius:8px}
-.exploration-info .loop{border-right:1px solid var(--border);padding-right:.5rem;margin-right:.5rem;color:var(--accent2)}
-.exploration-info .msg{word-break:break-word}
-.drops-list{font-size:.75rem;color:var(--muted);margin-top:.5rem;max-height:80px;overflow-y:auto}
-.drops-list span{display:inline-block;background:rgba(255,255,255,.06);padding:.15em .4em;margin:.1em;border-radius:4px;font-size:.85em}
-.log{font-size:.75rem;color:var(--muted);margin-top:1rem;max-height:100px;overflow-y:auto;padding:.5rem}
-.log p{padding:.15em 0}
+.btn-stop:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 6px 20px rgba(248,81,73,.4)}
+.btn-link{background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--accent2);text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.btn-link:hover{background:rgba(88,166,255,.15)}
+.drop-ranks{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem}
+.drop-ranks span{font-size:.8rem;padding:.3em .6em;border-radius:6px}
+.drop-ranks .S{background:linear-gradient(135deg,#ffd700,#ffb700);color:#333}
+.drop-ranks .A{background:linear-gradient(135deg,#c0c0c0,#a0a0a0);color:#333}
+.drop-ranks .B{background:linear-gradient(135deg,#58a6ff,#3d8bf0);color:#fff}
+.drop-ranks .C{background:rgba(255,255,255,.12);color:var(--text)}
+.drops-list{font-size:.8rem;margin-top:.75rem;max-height:100px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:.4rem}
+.drops-list span{display:inline-block;padding:.35em .6em;border-radius:6px;font-size:.85em}
+.activity{font-size:.8rem;color:var(--muted);margin-top:1rem}
+.activity-item{display:flex;flex-direction:column;gap:.3rem;padding:.6rem;background:rgba(0,0,0,.2);border-radius:8px;margin-bottom:.5rem;border-left:3px solid var(--accent2);animation:fadeIn .3s}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.activity-item .loop{color:var(--accent2);font-weight:600}
+.activity-item .msg{word-break:break-word;font-size:.9rem}
+.activity-item .drops{font-size:.75rem;margin-top:.2em}
+.activity-item .drops span{margin-right:.3em}
+.steps{font-size:.8rem;color:var(--muted);margin-top:1rem;line-height:2}
+.steps summary{cursor:pointer;font-weight:500}
+.steps code{background:rgba(255,255,255,.08);padding:.2em .5em;border-radius:4px}
 .offline{color:var(--danger);font-size:.8rem;margin-top:.5rem}
-[data-theme="light"]{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#cf5d0e;--accent2:#0969da;--success:#1a7f37;--danger:#cf222e}
-@media(prefers-color-scheme:light){body:not([data-theme]){--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#cf5d0e;--accent2:#0969da;--success:#1a7f37;--danger:#cf222e}}
-</style></head><body>
+[data-theme="light"]{--bg:#f0f2f5;--bg2:#fff}
+[data-theme="light"] body{background:linear-gradient(135deg,#f6f8fa 0%,#eaeef2 50%,#f6f8fa 100%)}
+[data-theme="light"] .card{background:#fff;border-color:#d0d7de}
+[data-theme="light"] .stat{background:#f6f8fa}
+[data-theme="light"] .drop-ranks .C{background:#eaeef2;color:#1f2328}
+</style>
+</head>
+<body>
 <button class="theme-btn" id="themeBtn" title="テーマ切替" aria-label="テーマ切替">🌙</button>
 <main>
-<h1>🧪 あるけみすと 自動探索</h1>
+<h1><span class="icon">⚔️</span> あるけみすと 自動探索</h1>
+
 <div class="card">
 <div class="status" id="status">接続中...</div>
 <div id="offlineMsg" class="offline" style="display:none">オフラインです</div>
-<p class="steps">
-1. <code>python3 auto_click.py</code> を実行<br>
-2. Braveでゲームにログイン<br>
-3. 「自動探索開始」を押す
-</p>
+
+<div class="stats">
+<div class="stat"><div class="val" id="statLoop">0</div><div class="label">周回数</div></div>
+<div class="stat"><div class="val" id="statTime">--:--</div><div class="label">経過時間</div></div>
+<div class="stat"><div class="val" id="statExp">0</div><div class="label">獲得経験値</div></div>
+<div class="stat"><div class="val" id="statDrops">0</div><div class="label">ドロップ数</div></div>
+</div>
+
+<div class="progress-wrap" id="progressWrap" style="display:none"><div class="progress-bar" id="progressBar"></div></div>
+
 <div class="btns">
 <button type="button" class="btn btn-start" id="startBtn">▶ 自動探索開始</button>
 <button type="button" class="btn btn-stop" id="stopBtn" disabled>■ 停止</button>
+<a href="https://games-alchemist.com/" target="_blank" rel="noopener" class="btn btn-link">🎮 ゲームを開く</a>
 </div>
-<div class="exploration-info" id="explorationInfo">
-<span class="loop" id="loopCount">-周目</span>
-<span class="msg" id="lastMessage"></span>
+</div>
+
+<div class="card">
+<h2>📋 直近の結果</h2>
+<div id="lastMessage" class="activity-item" style="display:none">
+<span class="loop" id="loopCount"></span>
+<span class="msg" id="lastMsgText"></span>
+<div class="drops" id="lastMsgDrops"></div>
+</div>
+<p id="noResult" style="color:var(--muted);font-size:.9rem">まだ探索結果がありません</p>
+
+<h2 style="margin-top:1rem">🏆 ドロップ（ランク別）</h2>
+<div class="drop-ranks" id="dropRanks"></div>
 <div class="drops-list" id="dropsList"></div>
 </div>
+
+<div class="card">
+<h2>📜 アクティビティ</h2>
+<div class="activity" id="activityLog"></div>
 </div>
-<div class="log" id="log"></div>
+
+<div class="card">
+<details class="steps">
+<summary>🚀 起動手順</summary>
+<p style="margin-top:.75rem">1. <code>python3 auto_click.py</code> を実行<br>
+2. Braveでゲームにログイン<br>
+3. 「自動探索開始」を押す</p>
+</details>
+</div>
 </main>
+
 <script>
-const $=e=>document.querySelector(e),st=$('#status'),sb=$('#startBtn'),sp=$('#stopBtn'),tb=$('#themeBtn'),lg=$('#log'),off=$('#offlineMsg'),lc=$('#loopCount'),lm=$('#lastMessage'),dl=$('#dropsList');
-const saved=localStorage.theme;const prefersLight=window.matchMedia('(prefers-color-scheme:light)').matches;
+const $=e=>document.querySelector(e),st=$('#status'),sb=$('#startBtn'),sp=$('#stopBtn'),tb=$('#themeBtn');
+const statLoop=$('#statLoop'),statTime=$('#statTime'),statExp=$('#statExp'),statDrops=$('#statDrops');
+const progressWrap=$('#progressWrap'),progressBar=$('#progressBar');
+const lastMsg=$('#lastMessage'),lastMsgText=$('#lastMsgText'),lastMsgDrops=$('#lastMsgDrops'),noResult=$('#noResult');
+const dropRanks=$('#dropRanks'),dropsList=$('#dropsList'),activityLog=$('#activityLog'),off=$('#offlineMsg');
+
+let sessionStart=null,timerId=null;
+
+const saved=localStorage.theme;
+const prefersLight=window.matchMedia('(prefers-color-scheme:light)').matches;
 if(saved==='light'||(!saved&&prefersLight)){document.documentElement.setAttribute('data-theme','light');tb.textContent='☀️'}
 tb.onclick=()=>{const d=document.documentElement;if(d.dataset.theme){d.removeAttribute('data-theme');tb.textContent='🌙';localStorage.theme=''}else{d.dataset.theme='light';tb.textContent='☀️';localStorage.theme='light'}}
-const MAX_LOG=50;const addLog=m=>{const p=document.createElement('p');p.textContent=new Date().toLocaleTimeString('ja')+' '+m;lg.appendChild(p);while(lg.children.length>MAX_LOG)lg.removeChild(lg.firstChild);lg.scrollTop=lg.scrollHeight}
-window.addEventListener('online',()=>{off.style.display='none'});window.addEventListener('offline',()=>{off.style.display='block';st.textContent='オフライン'})
+
+window.addEventListener('online',()=>{off.style.display='none'});
+window.addEventListener('offline',()=>{off.style.display='block';st.textContent='オフライン'});
 if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();
-function setUIFromState(running,lucky,loopCount,lastMessage,drops){
-  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;sp.setAttribute('disabled','')}
-  else if(running){st.textContent='探索実行中（停止はこのループ終了後に反映）';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false}
-  else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','')}
-  if(loopCount!==undefined)lc.textContent=loopCount>0?loopCount+'周目':'-周目';
-  if(lastMessage!==undefined)lm.textContent=lastMessage||'';
-  if(drops!==undefined)dl.innerHTML=drops.length?drops.map(d=>'<span>'+d+'</span>').join(''):'';
+
+function fmtTime(iso){
+  if(!iso)return'--:--';
+  const d=new Date(iso),n=new Date();
+  const s=Math.floor((n-d)/1000);
+  const m=Math.floor(s/60),h=Math.floor(m/60);
+  if(h>0)return h+'時間'+String(m%60).padStart(2,'0')+'分';
+  return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
 }
-async function syncState(){try{const r=await fetch('/api/state');if(r.ok){const d=await r.json();setUIFromState(d.running,d.lucky,d.loop_count,d.last_message,d.drops);return true}}catch(e){}return false}
+
+function rankClass(s){
+  const m=s.match(/^\[([A-Z])\]/);
+  return m?m[1]:'?';
+}
+
+function renderDropTag(d){
+  const c=rankClass(d);
+  return'<span class="'+c+'">'+d+'</span>';
+}
+
+function setUIFromState(d){
+  const run=d.running,lucky=d.lucky;
+  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;sp.setAttribute('disabled','')}
+  else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false;progressWrap.style.display='block'}
+  else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','');progressWrap.style.display='none'}
+
+  statLoop.textContent=d.loop_count||0;
+  statExp.textContent=(d.total_exp||0).toLocaleString();
+  statDrops.textContent=(d.drops||[]).length;
+
+  if(d.session_started_at&&run)sessionStart=d.session_started_at;
+  if(!run)sessionStart=null;
+  if(timerId)clearInterval(timerId);
+  if(sessionStart)timerId=setInterval(()=>statTime.textContent=fmtTime(sessionStart),1000);
+  statTime.textContent=fmtTime(sessionStart);
+
+  const byRank=d.drops_by_rank||{};
+  dropRanks.innerHTML=['S','A','B','C'].filter(r=>byRank[r]).map(r=>'<span class="'+r+'">'+r+': '+byRank[r]+'</span>').join('')||'<span class="C">まだなし</span>';
+
+  dropsList.innerHTML=(d.drops||[]).map(renderDropTag).join('')||'';
+
+  const acts=d.activity_log||[];
+  const lastAct=acts[0];
+  if(d.last_message&&lastAct){noResult.style.display='none';lastMsg.style.display='flex';$('#loopCount').textContent='#'+lastAct.loop+'周目';lastMsgText.textContent=d.last_message;lastMsgDrops.innerHTML=(lastAct.drops||[]).map(renderDropTag).join('')}
+  else if(d.last_message){noResult.style.display='none';lastMsg.style.display='flex';$('#loopCount').textContent='';lastMsgText.textContent=d.last_message;lastMsgDrops.innerHTML=''}
+  else{noResult.style.display='block';lastMsg.style.display='none'}
+
+  activityLog.innerHTML=(d.activity_log||[]).slice(0,10).map(a=>'<div class="activity-item"><span class="loop">#'+a.loop+'</span><span class="msg">'+a.msg+'</span><div class="drops">'+(a.drops||[]).map(renderDropTag).join('')+'</div></div>').join('')||'<p style="color:var(--muted)">まだアクティビティがありません</p>';
+}
+
+async function syncState(){
+  try{const r=await fetch('/api/state');if(r.ok){const d=await r.json();setUIFromState(d);return true}}catch(e){}
+  return false;
+}
 syncState();
 setInterval(syncState,3500);
+
 const es=new EventSource('/api/events');
-es.onopen=async()=>{if(!await syncState()){st.textContent='接続済み - 準備OK';st.className='status ready'}};
-es.onerror=()=>{st.textContent='再接続中...';st.className='status';syncState()};
-es.addEventListener('lucky_chance',e=>{const d=e.data?JSON.parse(e.data):{};setUIFromState(false,true,d.loop_count,d.message,d.drops);sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;addLog('ラッキーチャンス検出');if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})});
-es.addEventListener('exploration_started',e=>{const d=e.data?JSON.parse(e.data):{};setUIFromState(true,false,d.loop_count,d.message,d.drops);sb.disabled=true;sp.removeAttribute('disabled');sp.disabled=false});
-es.addEventListener('exploration_stopped',e=>{const d=e.data?JSON.parse(e.data):{};setUIFromState(false,false,d.loop_count,d.message,d.drops);sb.disabled=false;sp.disabled=true});
-es.addEventListener('exploration_log',e=>{try{const d=JSON.parse(e.data||'{}');setUIFromState(undefined,undefined,d.loop_count,d.message,d.drops)}catch(_){}});
-sb.onclick=async()=>{if(sb.disabled)return;sb.disabled=true;try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了';addLog('開始')}catch(e){addLog('エラー:'+e);sb.disabled=false}};
-sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});addLog('停止リクエスト送信（ループ終了後に停止）');st.textContent='停止予約 - このループ終了後に停止します'}catch(e){addLog('エラー:'+e)}};
+es.onopen=async()=>{if(!await syncState()){st.textContent='接続済み - 準備OK';st.className='status ready'}}
+es.onerror=()=>{st.textContent='再接続中...';st.className='status';syncState()}
+es.addEventListener('lucky_chance',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:true});sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})})
+es.addEventListener('exploration_started',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:true,lucky:false});sb.disabled=true;sp.removeAttribute('disabled');sp.disabled=false})
+es.addEventListener('exploration_stopped',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:false});sb.disabled=false;sp.disabled=true})
+es.addEventListener('exploration_log',e=>{try{setUIFromState(JSON.parse(e.data||'{}'))}catch(_){}})
+
+sb.onclick=async()=>{if(sb.disabled)return;sb.disabled=true;try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了'}catch(e){sb.disabled=false}}
+sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});st.textContent='停止予約 - このループ終了後に停止します'}catch(e){}}
 </script>
-</body></html>
+</body>
+</html>

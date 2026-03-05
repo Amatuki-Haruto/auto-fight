@@ -40,18 +40,21 @@ async def _is_champion(page) -> bool:
         return False
 
 
-def _extract_exploration_result(text: str) -> tuple[str, list[str]]:
+def _extract_exploration_result(text: str) -> tuple[str, int, list[str]]:
     """
     勝利メッセージ・経験値・ドロップを抽出
     例: 「自爆餅は勝利した。13の経験値を獲得した。[C] 弱体の種を手に入れた！」
+    戻り値: (message, exp, drops)
     """
     message = ""
+    exp = 0
     drops: list[str] = []
 
     # 勝利＋経験値のまとまりを取得（〇〇は勝利した。Nの経験値を獲得した。）
     vic_exp = re.search(r"([^\n]+は勝利した[^\n]*?(\d+)\s*の経験値を獲得した[^\n]*?)(?:\n|$)", text)
     if vic_exp:
         message = vic_exp.group(1).strip()
+        exp = int(vic_exp.group(2))
 
     # 単体でも拾う
     if not message:
@@ -60,6 +63,7 @@ def _extract_exploration_result(text: str) -> tuple[str, list[str]]:
         if vic_m:
             message = vic_m.group(1) + "。"
         if exp_m:
+            exp = int(exp_m.group(1))
             message += f" {exp_m.group(1)}の経験値を獲得した。"
 
     # ドロップ: [C] アイテム名を手に入れた など（[A-Z]はランク）
@@ -67,29 +71,48 @@ def _extract_exploration_result(text: str) -> tuple[str, list[str]]:
         drops.append(f"[{m.group(1)}] {m.group(2).strip()}")
 
     message = message.strip() or text[:300] if text else ""
-    return (message, drops)
+    return (message, exp, drops)
 
 
-async def _click_and_verify(page, locator, expect_url_contains: str) -> bool:
+def _url_matches_success(url: str, expect: str | list[str]) -> bool:
+    """URLが成功条件を満たすか"""
+    if isinstance(expect, str):
+        return expect in url
+    for pat in expect:
+        if pat in url:
+            return True
+    return False
+
+
+async def _click_and_verify(page, locator, expect_url_contains: str | list[str]) -> bool:
     """
-    クリック → 1秒待機 → 成功確認。失敗ならリトライ。
-    expect_url_contains: 成功時にURLに含まれる文字（例: "monster" または "home"）
+    クリック → 2秒待機 → 成功確認。失敗ならリトライ。
+    expect_url_contains: "home" または config.URL_AFTER_EXPLORE（探索/挑戦後）
     """
+    expect = expect_url_contains
+    if expect == "monster":
+        expect = getattr(config, "URL_AFTER_EXPLORE", ["monster", "arena", "battle", "tower"])
+
     for attempt in range(10):
         await human_like_click(page, locator)
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(2.0)
         try:
             url = page.url or ""
-            if expect_url_contains in url:
+            if _url_matches_success(url, expect):
                 return True
-            await page.wait_for_load_state("domcontentloaded", timeout=2000)
+            if isinstance(expect, list):
+                if "games-alchemist.com" in url and "/home/" not in url:
+                    return True
+            await page.wait_for_load_state("domcontentloaded", timeout=3000)
             url = page.url or ""
-            if expect_url_contains in url:
+            if _url_matches_success(url, expect):
+                return True
+            if isinstance(expect, list) and "games-alchemist.com" in url and "/home/" not in url:
                 return True
         except Exception:
             pass
-        _log(f"  → クリック未反映（試行{attempt+1}/10）、1秒待機後にリトライ")
-        await asyncio.sleep(1.0)
+        _log(f"  → クリック未反映（試行{attempt+1}/10）、2秒待機後にリトライ")
+        await asyncio.sleep(2.0)
     return False
 
 
@@ -323,7 +346,7 @@ async def run_loop() -> None:
             except Exception:
                 _log("※Web通知なしで動作。ボタン操作は uvicorn app:app --port 8000 → http://localhost:8000")
             _log("-" * 50)
-            _log("ログインするまで待機。ログイン後「自動探索開始」か5秒で自動開始")
+            _log("ログインするまで待機。ログイン後「自動探索開始」を押すか、初回のみ5秒で自動開始")
             _log("終了: Ctrl+C")
             _log("=" * 50)
 
@@ -348,6 +371,7 @@ async def run_loop() -> None:
             loop_count_file = config.USER_DATA_DIR.parent / ".loop_count"
 
             try:
+                first_wait = True
                 while True:
                     wait_start = time.monotonic()
                     started = False
@@ -359,8 +383,8 @@ async def run_loop() -> None:
                                 break
                         except Exception:
                             pass
-                        if (time.monotonic() - wait_start) >= config.AUTO_START_SECONDS:
-                            _log("  (5秒経過のため自動開始)")
+                        if first_wait and (time.monotonic() - wait_start) >= config.AUTO_START_SECONDS:
+                            _log("  (初回のため5秒経過で自動開始)")
                             started = True
                             break
                         await asyncio.sleep(2)
@@ -368,6 +392,7 @@ async def run_loop() -> None:
                     if not started:
                         continue
 
+                    first_wait = False
                     _log("自動探索を開始します。")
                     try:
                         await http_client.post(f"{base}/api/exploration-started", timeout=config.HTTP_TIMEOUT)
@@ -474,12 +499,12 @@ async def run_loop() -> None:
                         # 探索結果（勝利・経験値・ドロップ）を抽出してWebに送信
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            msg, new_drops = _extract_exploration_result(body_text or "")
-                            if msg or new_drops:
+                            msg, exp_val, new_drops = _extract_exploration_result(body_text or "")
+                            if msg or new_drops or exp_val > 0:
                                 try:
                                     await http_client.post(
                                         f"{base}/api/exploration-log",
-                                        json={"loop_count": count, "message": msg, "drops": new_drops},
+                                        json={"loop_count": count, "message": msg, "exp": exp_val, "drops": new_drops},
                                         timeout=config.HTTP_TIMEOUT,
                                     )
                                 except Exception:
