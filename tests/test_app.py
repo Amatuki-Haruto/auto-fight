@@ -49,6 +49,14 @@ def test_stop_then_check():
     assert r2.json() == {"stop": False}
 
 
+def test_stop_cancels_go():
+    """stop-exploration で未開始の go をキャンセルできる"""
+    client.post("/api/go")
+    client.post("/api/stop-exploration")
+    r = client.get("/api/check-go")
+    assert r.json() == {"go": False}
+
+
 def test_lucky_chance():
     r = client.post("/api/lucky-chance")
     assert r.status_code == 200

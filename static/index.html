@@ -142,7 +142,7 @@ const progressWrap=$('#progressWrap'),progressBar=$('#progressBar');
 const lastMsg=$('#lastMessage'),lastMsgText=$('#lastMsgText'),lastMsgDrops=$('#lastMsgDrops'),noResult=$('#noResult');
 const dropRanks=$('#dropRanks'),dropsList=$('#dropsList'),activityLog=$('#activityLog'),off=$('#offlineMsg');
 
-let sessionStart=null,timerId=null;
+let clientStartMs=null,timerId=null,goPending=false;
 
 const saved=localStorage.theme;
 const prefersLight=window.matchMedia('(prefers-color-scheme:light)').matches;
@@ -153,10 +153,9 @@ window.addEventListener('online',()=>{off.style.display='none'});
 window.addEventListener('offline',()=>{off.style.display='block';st.textContent='オフライン'});
 if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();
 
-function fmtTime(iso){
-  if(!iso)return'--:--';
-  const d=new Date(iso),n=new Date();
-  const s=Math.floor((n-d)/1000);
+function fmtElapsed(ms){
+  if(ms==null||ms<0)return'--:--';
+  const s=Math.floor(ms/1000);
   const m=Math.floor(s/60),h=Math.floor(m/60);
   if(h>0)return h+'時間'+String(m%60).padStart(2,'0')+'分';
   return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
@@ -177,7 +176,7 @@ function setUIFromState(d){
   const run=d.running,lucky=d.lucky;
   if(d.stop_reason){stopReasonEl.style.display='block';stopReasonEl.textContent='⚠ '+d.stop_reason;stopReasonEl.style.color='var(--danger)'}
   else{stopReasonEl.style.display='none'}
-  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;sp.setAttribute('disabled','')}
+  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.removeAttribute('disabled');sp.disabled=false;progressWrap.style.display='block'}
   else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false;progressWrap.style.display='block'}
   else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','');progressWrap.style.display='none'}
 
@@ -185,11 +184,11 @@ function setUIFromState(d){
   statExp.textContent=(d.total_exp||0).toLocaleString();
   statDrops.textContent=(d.drops||[]).length;
 
-  if(d.session_started_at&&run)sessionStart=d.session_started_at;
-  if(!run)sessionStart=null;
+  if(!run&&!goPending){clientStartMs=null;if(timerId){clearInterval(timerId);timerId=null}}
+  else if(run){goPending=false;if(clientStartMs==null&&d.session_started_at)clientStartMs=new Date(d.session_started_at).getTime()}
   if(timerId)clearInterval(timerId);
-  if(sessionStart)timerId=setInterval(()=>statTime.textContent=fmtTime(sessionStart),1000);
-  statTime.textContent=fmtTime(sessionStart);
+  if(clientStartMs!=null)timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),1000);
+  statTime.textContent=fmtElapsed(clientStartMs!=null?Date.now()-clientStartMs:null);
 
   const byRank=d.drops_by_rank||{};
   dropRanks.innerHTML=['S','A','B','C'].filter(r=>byRank[r]).map(r=>'<span class="'+r+'">'+r+': '+byRank[r]+'</span>').join('')||'<span class="C">まだなし</span>';
@@ -217,10 +216,10 @@ es.onopen=async()=>{if(!await syncState()){st.textContent='接続済み - 準備
 es.onerror=()=>{st.textContent='再接続中...';st.className='status';syncState()}
 es.addEventListener('lucky_chance',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:true});sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})})
 es.addEventListener('exploration_started',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:true,lucky:false});sb.disabled=true;sp.removeAttribute('disabled');sp.disabled=false})
-es.addEventListener('exploration_stopped',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:false});sb.disabled=false;sp.disabled=true})
+es.addEventListener('exploration_stopped',e=>{goPending=false;const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:false});sb.disabled=false;sp.disabled=true})
 es.addEventListener('exploration_log',e=>{try{setUIFromState(JSON.parse(e.data||'{}'))}catch(_){}})
 
-sb.onclick=async()=>{if(sb.disabled)return;sb.disabled=true;try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了'}catch(e){sb.disabled=false}}
+sb.onclick=async()=>{if(sb.disabled)return;sb.disabled=true;goPending=true;clientStartMs=Date.now();sp.removeAttribute('disabled');sp.disabled=false;if(timerId)clearInterval(timerId);timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),1000);statTime.textContent=fmtElapsed(0);try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了 - 探索開始を待機中'}catch(e){sb.disabled=false;goPending=false;clientStartMs=null;if(timerId){clearInterval(timerId);timerId=null}}}
 sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});st.textContent='停止予約 - このループ終了後に停止します'}catch(e){}}
 </script>
 </body>

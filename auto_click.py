@@ -17,7 +17,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
@@ -128,9 +128,9 @@ def _url_matches_success(url: str, expect: str | list[str]) -> bool:
     return False
 
 
-async def _find_button(page, selectors: list[str], timeout: int | None = None) -> Optional[any]:
+async def _find_button(page, selectors: list[str], timeout: int | None = None) -> Optional[Any]:
     """複数セレクタでフォールバック。テキストセレクタも試行"""
-    tout = timeout or config.BUTTON_TIMEOUT_MS
+    tout = timeout or getattr(config, "BUTTON_TIMEOUT_MS", 2000)
     for sel in selectors:
         try:
             btn = page.locator(sel).first
@@ -440,6 +440,12 @@ async def run_loop() -> None:
                     wait_start = time.monotonic()
                     started = False
                     while True:
+                        try:
+                            r = await http_client.get(f"{base}/api/check-stop", timeout=2.0)
+                            if r.json().get("stop"):
+                                break  # 停止要求：開始しない
+                        except Exception:
+                            pass
                         try:
                             r = await http_client.get(f"{base}/api/check-go", timeout=config.HTTP_TIMEOUT)
                             if r.json().get("go"):

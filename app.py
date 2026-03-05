@@ -180,8 +180,9 @@ async def api_check_go() -> dict:
 
 @app.post("/api/stop-exploration")
 async def api_stop_exploration() -> dict:
-    global stop_requested
+    global stop_requested, go_requested
     stop_requested = True
+    go_requested = False  # 未開始の場合は開始をキャンセル
     return {"ok": True}
 
 
