@@ -59,3 +59,11 @@ def test_exploration_started():
     r = client.post("/api/exploration-started")
     assert r.status_code == 200
     assert r.json() == {"ok": True}
+
+
+def test_api_state():
+    r = client.get("/api/state")
+    assert r.status_code == 200
+    data = r.json()
+    assert "running" in data
+    assert "lucky" in data

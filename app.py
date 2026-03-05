@@ -20,6 +20,10 @@ go_requested: bool = False
 stop_requested: bool = False
 sse_clients: list = []
 
+# 探索状態（UI同期・再接続用）
+state_running: bool = False
+state_lucky: bool = False
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -61,8 +65,17 @@ def _fallback_html() -> str:
     return """<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>あるけみすと</title></head><body><h1>あるけみすと 自動探索</h1><p>static/index.html を配置してください</p></body></html>"""
 
 
+@app.get("/api/state")
+async def api_state() -> dict:
+    """現在の探索状態（再接続・初期表示の同期用）"""
+    return {"running": state_running, "lucky": state_lucky}
+
+
 @app.post("/api/lucky-chance")
 async def api_lucky_chance() -> dict:
+    global state_running, state_lucky
+    state_running = False
+    state_lucky = True
     await broadcast("lucky_chance", {"at": datetime.now().isoformat()})
     return {"ok": True}
 
@@ -101,12 +114,18 @@ async def api_check_stop() -> dict:
 
 @app.post("/api/exploration-started")
 async def api_exploration_started() -> dict:
+    global state_running, state_lucky
+    state_running = True
+    state_lucky = False
     await broadcast("exploration_started", {"at": datetime.now().isoformat()})
     return {"ok": True}
 
 
 @app.post("/api/exploration-stopped")
 async def api_exploration_stopped() -> dict:
+    global state_running, state_lucky
+    state_running = False
+    state_lucky = False
     await broadcast("exploration_stopped", {"at": datetime.now().isoformat()})
     return {"ok": True}
 

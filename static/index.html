@@ -41,8 +41,8 @@ h1{font-size:1.4rem;font-weight:700;margin-bottom:1.25rem;color:var(--text)}
 3. 「自動探索開始」を押す
 </p>
 <div class="btns">
-<button class="btn btn-start" id="startBtn">▶ 自動探索開始</button>
-<button class="btn btn-stop" id="stopBtn" disabled>■ 停止</button>
+<button type="button" class="btn btn-start" id="startBtn">▶ 自動探索開始</button>
+<button type="button" class="btn btn-stop" id="stopBtn" disabled>■ 停止</button>
 </div>
 </div>
 <div class="log" id="log"></div>
@@ -55,12 +55,19 @@ tb.onclick=()=>{const d=document.documentElement;if(d.dataset.theme){d.removeAtt
 const MAX_LOG=50;const addLog=m=>{const p=document.createElement('p');p.textContent=new Date().toLocaleTimeString('ja')+' '+m;lg.appendChild(p);while(lg.children.length>MAX_LOG)lg.removeChild(lg.firstChild);lg.scrollTop=lg.scrollHeight}
 window.addEventListener('online',()=>{off.style.display='none'});window.addEventListener('offline',()=>{off.style.display='block';st.textContent='オフライン'})
 if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();
+function setUIFromState(running,lucky){
+  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;sp.setAttribute('disabled','')}
+  else if(running){st.textContent='探索実行中（停止はこのループ終了後に反映）';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false}
+  else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','')}
+}
+async function syncState(){try{const r=await fetch('/api/state');if(r.ok){const d=await r.json();setUIFromState(d.running,d.lucky);return true}}catch(e){}return false}
+syncState();
 const es=new EventSource('/api/events');
-es.onopen=()=>{st.textContent='接続済み - 準備OK';st.className='status ready'};
-es.onerror=()=>{st.textContent='再接続中...';st.className='status'};
-es.addEventListener('lucky_chance',()=>{st.textContent='★ ラッキーチャンス！ 「開始」で20秒後に再開';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;addLog('ラッキーチャンス検出');if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})});
-es.addEventListener('exploration_started',()=>{st.textContent='探索実行中（停止はこのループ終了後に反映）';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.disabled=false;sp.style.pointerEvents='auto';sp.style.opacity='1'});
-es.addEventListener('exploration_stopped',()=>{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true});
+es.onopen=async()=>{if(!await syncState()){st.textContent='接続済み - 準備OK';st.className='status ready'}};
+es.onerror=()=>{st.textContent='再接続中...';st.className='status';syncState()};
+es.addEventListener('lucky_chance',()=>{st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;sp.setAttribute('disabled','');addLog('ラッキーチャンス検出');if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})});
+es.addEventListener('exploration_started',()=>{st.textContent='探索実行中（停止はこのループ終了後に反映）';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false});
+es.addEventListener('exploration_stopped',()=>{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','')});
 sb.onclick=async()=>{if(sb.disabled)return;const prev=sb.disabled;sb.disabled=true;try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了';addLog('開始')}catch(e){addLog('エラー:'+e);sb.disabled=prev}finally{setTimeout(()=>{if(st.className.includes('ready')||st.className.includes('lucky'))sb.disabled=false},600)}};
 sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});addLog('停止リクエスト送信（ループ終了後に停止）');st.textContent='停止予約 - このループ終了後に停止します'}catch(e){addLog('エラー:'+e)}};
 </script>

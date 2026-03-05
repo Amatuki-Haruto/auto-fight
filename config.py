@@ -21,12 +21,12 @@ BRAVE_PATH = os.environ.get(
     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
 )
 
-# 待機時間（秒）- ゲームの20秒周期に合わせつつバレない程度のばらつき
-WAIT_START = (0.8, 1.5)
-WAIT_AFTER_HOME_SCROLL = (0.3, 0.8)
-WAIT_AFTER_MONSTER_SCROLL = (0.3, 0.8)
-WAIT_AFTER_RETURN = (17.5, 21.5)  # 20秒前後に（19.5〜25だと30秒超える）
-WAIT_HOVER_BEFORE_CLICK = (0.05, 0.2)
+# 待機時間（秒）- ゲーム20秒周期に合わせつつ最小限のばらつきで高速化
+WAIT_START = (0.2, 0.5)
+WAIT_AFTER_HOME_SCROLL = (0.15, 0.4)
+WAIT_AFTER_MONSTER_SCROLL = (0.15, 0.4)
+WAIT_AFTER_RETURN = (16.0, 19.0)  # 約17.5秒（操作時間含め20秒前後に）
+WAIT_HOVER_BEFORE_CLICK = (0.02, 0.08)
 
 # タイムアウト
 TIMEOUT_MS = 30000

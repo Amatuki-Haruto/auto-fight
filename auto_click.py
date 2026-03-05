@@ -37,7 +37,7 @@ async def human_like_click(page, locator) -> None:
     """
     await locator.wait_for(state="attached", timeout=config.TIMEOUT_MS)
     await locator.scroll_into_view_if_needed()
-    await asyncio.sleep(random.uniform(0.15, 0.45))
+    await asyncio.sleep(random.uniform(0.08, 0.2))
     await locator.wait_for(state="visible", timeout=config.TIMEOUT_MS)
     box = await locator.bounding_box()
     if not box:
@@ -62,21 +62,20 @@ async def human_like_click(page, locator) -> None:
     c2_y = start_y + (target_y - start_y) * random.uniform(0.6, 0.8) + random.uniform(-15, 15)
 
     dist = ((target_x - start_x) ** 2 + (target_y - start_y) ** 2) ** 0.5
-    steps = max(6, min(18, int(dist / 50))) + random.randint(-2, 2)
+    steps = max(4, min(10, int(dist / 80))) + random.randint(-1, 1)
 
     for i in range(1, steps + 1):
         t_raw = i / steps
-        t = t_raw**1.3 * (1 - (1 - t_raw) ** 1.2) + t_raw * 0.3
+        t = t_raw**1.2 * (1 - (1 - t_raw) ** 1.1) + t_raw * 0.2
         x = _cubic_bezier(t, start_x, c1_x, c2_x, target_x)
         y = _cubic_bezier(t, start_y, c1_y, c2_y, target_y)
-        if random.random() < 0.3:
-            x += random.gauss(0, 0.8)
-            y += random.gauss(0, 0.8)
-        await page.mouse.move(x, y, steps=random.choice([1, 2]))
-        delay = max(0.02, min(0.12, random.gauss(0.045, 0.02)))
-        await asyncio.sleep(delay)
+        if random.random() < 0.25:
+            x += random.gauss(0, 0.6)
+            y += random.gauss(0, 0.6)
+        await page.mouse.move(x, y, steps=1)
+        await asyncio.sleep(max(0.015, min(0.06, random.gauss(0.03, 0.01))))
 
-    if random.random() < 0.15:
+    if random.random() < 0.1:
         overshoot_x = target_x + random.uniform(3, 12) * random.choice([-1, 1])
         overshoot_y = target_y + random.uniform(2, 8) * random.choice([-1, 1])
         await page.mouse.move(overshoot_x, overshoot_y, steps=1)
@@ -89,30 +88,46 @@ async def human_like_click(page, locator) -> None:
 
 
 async def _human_scroll_down(page, amount: Optional[int] = None) -> None:
-    """人間らしいスクロール：可変量・チャンク分割・微休止"""
+    """人間らしいスクロール（短時間で）"""
     if amount is None:
-        amount = random.randint(280, 520)
-    chunk = random.randint(60, 200)
+        amount = random.randint(250, 400)
+    chunk = random.randint(100, 200)
     moved = 0
     while moved < amount:
         step = min(chunk, amount - moved)
         await page.evaluate(f"window.scrollBy(0, {step})")
         moved += step
-        await asyncio.sleep(random.uniform(0.015, 0.1))
-        if random.random() < 0.15:
-            await asyncio.sleep(random.uniform(0.1, 0.3))
+        await asyncio.sleep(random.uniform(0.01, 0.04))
+        if random.random() < 0.08:
+            await asyncio.sleep(random.uniform(0.05, 0.12))
 
 
 async def _human_scroll_to_bottom(page) -> None:
-    """ページ最下部まで人間らしくスクロール"""
+    """ページ最下部までスクロール"""
     await page.evaluate(
         "window.scrollTo(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight))"
     )
-    if random.random() < 0.4:
-        await asyncio.sleep(random.uniform(0.1, 0.25))
-        await page.evaluate("window.scrollBy(0, -30)")
-        await asyncio.sleep(random.uniform(0.05, 0.15))
-        await page.evaluate("window.scrollBy(0, 40)")
+    if random.random() < 0.25:
+        await asyncio.sleep(random.uniform(0.05, 0.12))
+        await page.evaluate("window.scrollBy(0, -20)")
+        await asyncio.sleep(random.uniform(0.02, 0.06))
+        await page.evaluate("window.scrollBy(0, 25)")
+
+
+async def _safe_goto_home(page, max_retries: int = 3) -> bool:
+    """ホームへ安全に遷移（ERR_ABORTED等をキャッチしてリトライ）"""
+    for attempt in range(max_retries):
+        try:
+            await page.goto(config.HOME_URL, wait_until="domcontentloaded", timeout=15000)
+            return True
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "err_aborted" in err_msg or "aborted" in err_msg or "destroyed" in err_msg:
+                _log(f"  → 遷移失敗 (試行{attempt+1}/{max_retries})、待機してリトライ")
+                await asyncio.sleep(random.uniform(1.0, 2.5))
+                continue
+            raise
+    return False
 
 
 async def _find_button(page, selectors: list[str], timeout: int = 2000):
@@ -129,12 +144,19 @@ async def _find_button(page, selectors: list[str], timeout: int = 2000):
 
 async def _check_and_wait_lucky_chance(page, client: httpx.AsyncClient) -> bool:
     """ラッキーチャンス検知→Web通知→再開待ち"""
-    lucky = await page.evaluate(
-        """() => {
-            const t = document.body.innerText.toUpperCase();
-            return (t.includes('LUCKY') && t.includes('CHANCE')) || t.includes('LUCKYCHANCE');
-        }"""
-    )
+    try:
+        lucky = await page.evaluate(
+            """() => {
+                const t = document.body.innerText.toUpperCase();
+                return (t.includes('LUCKY') && t.includes('CHANCE')) || t.includes('LUCKYCHANCE');
+            }"""
+        )
+    except Exception as e:
+        # ページ遷移中で実行コンテキストが破棄された場合など → ラッキーチャンスなしとして続行
+        err_msg = str(e).lower()
+        if "destroyed" in err_msg or "navigation" in err_msg or "target closed" in err_msg:
+            return False
+        raise
     if not lucky:
         return False
 
@@ -168,6 +190,10 @@ async def _check_and_wait_lucky_chance(page, client: httpx.AsyncClient) -> bool:
 
     _log("再開します。20秒後に探索から始めます。")
     await asyncio.sleep(20)
+    try:
+        await client.post(f"{base}/api/exploration-started", timeout=config.HTTP_TIMEOUT)
+    except Exception:
+        pass
     return True
 
 
@@ -208,6 +234,7 @@ async def run_loop() -> None:
                     "--window-position=0,0",
                     "--disable-extensions",
                     "--disable-popup-blocking",
+                    "--mute-audio",
                 ],
                 "ignore_default_args": ["--enable-automation"],
             }
@@ -238,7 +265,7 @@ async def run_loop() -> None:
             _log("=" * 50)
 
             if "games-alchemist.com/home" not in page.url:
-                await page.goto(config.HOME_URL, wait_until="domcontentloaded")
+                await _safe_goto_home(page)
 
             logged_in = False
             last_msg_at = 0.0
@@ -344,14 +371,14 @@ async def run_loop() -> None:
                                 consecutive_errors += 1
                                 if consecutive_errors >= 5:
                                     _log("  ※連続エラーが多いため停止を検討してください")
-                                await page.goto(config.HOME_URL, wait_until="domcontentloaded")
+                                await _safe_goto_home(page)
                                 continue
 
                         consecutive_errors = 0
                         await page.wait_for_load_state("domcontentloaded")
-                        await asyncio.sleep(random.uniform(0.8, 1.5))
-                        if random.random() < 0.05:
-                            await asyncio.sleep(random.uniform(0.3, 0.8))
+                        await asyncio.sleep(random.uniform(0.4, 0.8))
+                        if random.random() < 0.04:
+                            await asyncio.sleep(random.uniform(0.2, 0.5))
 
                         if await _check_and_wait_lucky_chance(page, http_client):
                             await _human_scroll_to_bottom(page)
@@ -361,7 +388,7 @@ async def run_loop() -> None:
                             if return_btn:
                                 await human_like_click(page, return_btn)
                             else:
-                                await page.goto(config.HOME_URL, wait_until="domcontentloaded")
+                                await _safe_goto_home(page)
                             continue
 
                         await _human_scroll_to_bottom(page)
@@ -371,12 +398,12 @@ async def run_loop() -> None:
                         return_btn = await _find_button(page, config.SELECTOR_RETURN, timeout=3000)
                         if not return_btn:
                             _log("  → 街に戻るボタンが見つかりません。ホームへ戻ります。")
-                            await page.goto(config.HOME_URL, wait_until="domcontentloaded")
+                            await _safe_goto_home(page)
                             continue
 
                         await human_like_click(page, return_btn)
                         await page.wait_for_load_state("domcontentloaded")
-                        await asyncio.sleep(random.uniform(0.8, 1.5))
+                        await asyncio.sleep(random.uniform(0.4, 0.8))
 
                         if await _check_and_wait_lucky_chance(page, http_client):
                             continue
