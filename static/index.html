@@ -59,9 +59,9 @@ const es=new EventSource('/api/events');
 es.onopen=()=>{st.textContent='接続済み - 準備OK';st.className='status ready'};
 es.onerror=()=>{st.textContent='再接続中...';st.className='status'};
 es.addEventListener('lucky_chance',()=>{st.textContent='★ ラッキーチャンス！ 「開始」で20秒後に再開';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;addLog('ラッキーチャンス検出');if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})});
-es.addEventListener('exploration_started',()=>{st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.disabled=false});
+es.addEventListener('exploration_started',()=>{st.textContent='探索実行中（停止はこのループ終了後に反映）';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.disabled=false;sp.style.pointerEvents='auto';sp.style.opacity='1'});
 es.addEventListener('exploration_stopped',()=>{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true});
 sb.onclick=async()=>{if(sb.disabled)return;const prev=sb.disabled;sb.disabled=true;try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了';addLog('開始')}catch(e){addLog('エラー:'+e);sb.disabled=prev}finally{setTimeout(()=>{if(st.className.includes('ready')||st.className.includes('lucky'))sb.disabled=false},600)}};
-sp.onclick=async()=>{if(sp.disabled)return;sp.disabled=true;try{await fetch('/api/stop-exploration',{method:'POST'});addLog('停止送信')}catch(e){addLog('エラー:'+e)}finally{setTimeout(()=>{if(st.className.includes('running'))sp.disabled=false},600)}};
+sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});addLog('停止リクエスト送信（ループ終了後に停止）');st.textContent='停止予約 - このループ終了後に停止します'}catch(e){addLog('エラー:'+e)}};
 </script>
 </body></html>

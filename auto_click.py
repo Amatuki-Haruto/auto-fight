@@ -16,7 +16,7 @@ from typing import Optional
 import httpx
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 
-import config
+import config  # type: ignore
 
 
 def _cubic_bezier(t: float, p0: float, p1: float, p2: float, p3: float) -> float:
@@ -293,6 +293,7 @@ async def run_loop() -> None:
                             _log(f"最大ループ数 {config.MAX_LOOPS} に達しました。")
                             break
 
+                        # 停止チェック（ループの最初＝前ループ完了後。押したらこのループは行わず停止）
                         if count > 0:
                             try:
                                 r = await http_client.get(f"{base}/api/check-stop", timeout=3.0)
@@ -348,9 +349,9 @@ async def run_loop() -> None:
 
                         consecutive_errors = 0
                         await page.wait_for_load_state("domcontentloaded")
-                        await asyncio.sleep(random.uniform(1.2, 2.5))
-                        if random.random() < 0.06:
-                            await asyncio.sleep(random.uniform(0.8, 2.2))
+                        await asyncio.sleep(random.uniform(0.8, 1.5))
+                        if random.random() < 0.05:
+                            await asyncio.sleep(random.uniform(0.3, 0.8))
 
                         if await _check_and_wait_lucky_chance(page, http_client):
                             await _human_scroll_to_bottom(page)
@@ -375,7 +376,7 @@ async def run_loop() -> None:
 
                         await human_like_click(page, return_btn)
                         await page.wait_for_load_state("domcontentloaded")
-                        await asyncio.sleep(random.uniform(1.2, 2.5))
+                        await asyncio.sleep(random.uniform(0.8, 1.5))
 
                         if await _check_and_wait_lucky_chance(page, http_client):
                             continue
