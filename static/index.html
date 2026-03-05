@@ -1,0 +1,67 @@
+<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>あるけみすと 自動探索</title><style>
+:root{--bg:#0a0e14;--card:#131920;--border:#2a3441;--text:#e6edf3;--muted:#8b949e;--accent:#f0883e;--accent2:#58a6ff;--success:#3fb950;--danger:#f85149;--radius:12px;--shadow:0 8px 32px rgba(0,0,0,.4)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Hiragino Sans','Yu Gothic',Meiryo,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.6}
+main{max-width:400px;margin:0 auto;padding:1.5rem 1rem}
+h1{font-size:1.4rem;font-weight:700;margin-bottom:1.25rem;color:var(--text)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow)}
+.status{display:flex;align-items:center;gap:.5rem;padding:.75rem 1rem;background:rgba(255,255,255,.04);border-radius:8px;font-size:.9rem;font-weight:500}
+.status::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--muted);animation:pulse 2s infinite}
+.status.ready::before{background:var(--success)}
+.status.running::before{background:var(--accent2)}
+.status.lucky::before{background:var(--accent);animation:pulse .8s infinite}
+.status.lucky{box-shadow:0 0 0 2px rgba(240,136,62,.3)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.steps{font-size:.8rem;color:var(--muted);margin-top:1rem;line-height:1.9}
+.steps code{background:rgba(255,255,255,.08);padding:.15em .4em;border-radius:4px;font-size:.85em}
+.btns{display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap}
+.btn{flex:1;min-width:120px;padding:.8rem 1rem;font-size:.9rem;font-weight:600;border:none;border-radius:8px;cursor:pointer;transition:transform .15s,box-shadow .15s;font-family:inherit}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-start{background:linear-gradient(135deg,var(--accent),#c76d2e);color:#fff}
+.btn-start:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(240,136,62,.3)}
+.btn-stop{background:linear-gradient(135deg,var(--danger),#c0392b);color:#fff}
+.btn-stop:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(248,81,73,.3)}
+.theme-btn{position:fixed;top:1rem;right:1rem;width:40px;height:40px;border-radius:10px;background:var(--card);border:1px solid var(--border);cursor:pointer;font-size:1.1rem;transition:transform .15s}
+.theme-btn:hover{transform:scale(1.05)}
+.log{font-size:.75rem;color:var(--muted);margin-top:1rem;max-height:100px;overflow-y:auto;padding:.5rem}
+.log p{padding:.15em 0}
+.offline{color:var(--danger);font-size:.8rem;margin-top:.5rem}
+[data-theme="light"]{--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#cf5d0e;--accent2:#0969da;--success:#1a7f37;--danger:#cf222e}
+@media(prefers-color-scheme:light){body:not([data-theme]){--bg:#f6f8fa;--card:#fff;--border:#d0d7de;--text:#1f2328;--muted:#656d76;--accent:#cf5d0e;--accent2:#0969da;--success:#1a7f37;--danger:#cf222e}}
+</style></head><body>
+<button class="theme-btn" id="themeBtn" title="テーマ切替" aria-label="テーマ切替">🌙</button>
+<main>
+<h1>🧪 あるけみすと 自動探索</h1>
+<div class="card">
+<div class="status" id="status">接続中...</div>
+<div id="offlineMsg" class="offline" style="display:none">オフラインです</div>
+<p class="steps">
+1. <code>python3 auto_click.py</code> を実行<br>
+2. Braveでゲームにログイン<br>
+3. 「自動探索開始」を押す
+</p>
+<div class="btns">
+<button class="btn btn-start" id="startBtn">▶ 自動探索開始</button>
+<button class="btn btn-stop" id="stopBtn" disabled>■ 停止</button>
+</div>
+</div>
+<div class="log" id="log"></div>
+</main>
+<script>
+const $=e=>document.querySelector(e),st=$('#status'),sb=$('#startBtn'),sp=$('#stopBtn'),tb=$('#themeBtn'),lg=$('#log'),off=$('#offlineMsg');
+const saved=localStorage.theme;const prefersLight=window.matchMedia('(prefers-color-scheme:light)').matches;
+if(saved==='light'||(!saved&&prefersLight)){document.documentElement.setAttribute('data-theme','light');tb.textContent='☀️'}
+tb.onclick=()=>{const d=document.documentElement;if(d.dataset.theme){d.removeAttribute('data-theme');tb.textContent='🌙';localStorage.theme=''}else{d.dataset.theme='light';tb.textContent='☀️';localStorage.theme='light'}}
+const MAX_LOG=50;const addLog=m=>{const p=document.createElement('p');p.textContent=new Date().toLocaleTimeString('ja')+' '+m;lg.appendChild(p);while(lg.children.length>MAX_LOG)lg.removeChild(lg.firstChild);lg.scrollTop=lg.scrollHeight}
+window.addEventListener('online',()=>{off.style.display='none'});window.addEventListener('offline',()=>{off.style.display='block';st.textContent='オフライン'})
+if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();
+const es=new EventSource('/api/events');
+es.onopen=()=>{st.textContent='接続済み - 準備OK';st.className='status ready'};
+es.onerror=()=>{st.textContent='再接続中...';st.className='status'};
+es.addEventListener('lucky_chance',()=>{st.textContent='★ ラッキーチャンス！ 「開始」で20秒後に再開';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;addLog('ラッキーチャンス検出');if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})});
+es.addEventListener('exploration_started',()=>{st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.disabled=false});
+es.addEventListener('exploration_stopped',()=>{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true});
+sb.onclick=async()=>{if(sb.disabled)return;const prev=sb.disabled;sb.disabled=true;try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了';addLog('開始')}catch(e){addLog('エラー:'+e);sb.disabled=prev}finally{setTimeout(()=>{if(st.className.includes('ready')||st.className.includes('lucky'))sb.disabled=false},600)}};
+sp.onclick=async()=>{if(sp.disabled)return;sp.disabled=true;try{await fetch('/api/stop-exploration',{method:'POST'});addLog('停止送信')}catch(e){addLog('エラー:'+e)}finally{setTimeout(()=>{if(st.className.includes('running'))sp.disabled=false},600)}};
+</script>
+</body></html>
