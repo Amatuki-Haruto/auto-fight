@@ -77,15 +77,6 @@ async def _check_force_stop(page) -> Optional[str]:
     return None
 
 
-async def _check_defeat(page) -> bool:
-    """敗北メッセージをチェック"""
-    text = await _get_page_text(page)
-    for pat in getattr(config, "DEFEAT_PATTERNS", ["敗北", "負けました"]):
-        if pat in text:
-            return True
-    return False
-
-
 async def _is_champion(page) -> bool:
     """〇〇階のチャンプです → 天空闘技場行けない"""
     text = await _get_page_text(page)
@@ -579,11 +570,6 @@ async def run_loop() -> None:
                         await _human_scroll_to_bottom(page)
                         wmin, wmax = config.WAIT_AFTER_MONSTER_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
-
-                        if await _check_defeat(page):
-                            _log("  → 敗北を検知。ホームへ戻ります。", level="warn")
-                            await _safe_goto_home(page)
-                            continue
 
                         try:
                             body_text = await _get_page_text(page)

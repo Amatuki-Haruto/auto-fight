@@ -103,7 +103,3 @@ FORCE_STOP_PATTERNS = [
     "あなたはLv100になりました",
     "転生してください",
 ]
-DEFEAT_PATTERNS = [
-    "敗北",
-    "負けました",
-]
