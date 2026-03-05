@@ -87,6 +87,7 @@ h1 .icon{font-size:1.8rem}
 
 <div class="card">
 <div class="status" id="status">接続中...</div>
+<div id="stopReason" class="offline" style="display:none;margin-top:.5rem"></div>
 <div id="offlineMsg" class="offline" style="display:none">オフラインです</div>
 
 <div class="stats">
@@ -171,8 +172,11 @@ function renderDropTag(d){
   return'<span class="'+c+'">'+d+'</span>';
 }
 
+const stopReasonEl=$('#stopReason');
 function setUIFromState(d){
   const run=d.running,lucky=d.lucky;
+  if(d.stop_reason){stopReasonEl.style.display='block';stopReasonEl.textContent='⚠ '+d.stop_reason;stopReasonEl.style.color='var(--danger)'}
+  else{stopReasonEl.style.display='none'}
   if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;sp.setAttribute('disabled','')}
   else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false;progressWrap.style.display='block'}
   else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','');progressWrap.style.display='none'}

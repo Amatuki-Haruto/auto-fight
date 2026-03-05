@@ -11,3 +11,5 @@ def test_config_import():
     assert len(config.SELECTOR_EXPLORE) >= 1
     assert config.WAIT_START[0] < config.WAIT_START[1]
     assert config.WAIT_AFTER_RETURN[0] < config.WAIT_AFTER_RETURN[1]
+    assert hasattr(config, "FORCE_STOP_PATTERNS")
+    assert "あなたはLv100になりました" in config.FORCE_STOP_PATTERNS

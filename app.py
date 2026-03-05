@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +35,8 @@ state_session_started_at: str | None = None  # ISO形式
 state_total_exp: int = 0
 state_drops_by_rank: dict[str, int] = {}  # {"S": 1, "A": 2, ...}
 state_activity_log: list[dict] = []  # 直近のアクティビティ [{loop, msg, drops, at}, ...]
+state_stop_reason: str = ""  # 強制停止理由（転生等）
+state_stats: dict = {}  # 統計（連続エラー数等）
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_ACTIVITY_LOG = 20
@@ -78,6 +80,10 @@ def _fallback_html() -> str:
     return """<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>あるけみすと</title></head><body><h1>あるけみすと 自動探索</h1><p>static/index.html を配置してください</p></body></html>"""
 
 
+class StopReasonBody(BaseModel):
+    reason: str = ""
+
+
 @app.get("/api/state")
 async def api_state() -> dict:
     """現在の探索状態（再接続・初期表示の同期用）"""
@@ -91,6 +97,8 @@ async def api_state() -> dict:
         "total_exp": state_total_exp,
         "drops_by_rank": state_drops_by_rank.copy(),
         "activity_log": state_activity_log.copy(),
+        "stop_reason": state_stop_reason,
+        "stats": state_stats.copy(),
     }
 
 
@@ -99,6 +107,7 @@ class ExplorationLogBody(BaseModel):
     message: str = ""
     exp: int = 0
     drops: list[str] | None = None  # 今回のドロップ（追加される）
+    stats: dict | None = None  # 統計（consecutive_errors, loop_time_sec等）
 
 
 def _rank_from_drop(s: str) -> str:
@@ -110,8 +119,8 @@ def _rank_from_drop(s: str) -> str:
 
 @app.post("/api/exploration-log")
 async def api_exploration_log(body: ExplorationLogBody) -> dict:
-    """探索ログ受信（周回・メッセージ・経験値・ドロップ追加）"""
-    global state_loop_count, state_last_message, state_drops, state_total_exp, state_drops_by_rank, state_activity_log
+    """探索ログ受信（周回・メッセージ・経験値・ドロップ・統計）"""
+    global state_loop_count, state_last_message, state_drops, state_total_exp, state_drops_by_rank, state_activity_log, state_stats
     if body.loop_count > 0:
         state_loop_count = body.loop_count
     if body.message:
@@ -127,6 +136,8 @@ async def api_exploration_log(body: ExplorationLogBody) -> dict:
         entry = {"loop": state_loop_count, "msg": body.message, "drops": body.drops or [], "exp": body.exp, "at": datetime.now().isoformat()}
         state_activity_log.insert(0, entry)
         state_activity_log = state_activity_log[:MAX_ACTIVITY_LOG]
+    if body.stats:
+        state_stats.update(body.stats)
     payload = {
         "running": state_running,
         "lucky": state_lucky,
@@ -193,6 +204,8 @@ def _state_payload() -> dict:
         "total_exp": state_total_exp,
         "drops_by_rank": state_drops_by_rank.copy(),
         "activity_log": state_activity_log.copy(),
+        "stop_reason": state_stop_reason,
+        "stats": state_stats.copy(),
     }
 
 
@@ -207,10 +220,11 @@ async def api_exploration_started() -> dict:
 
 
 @app.post("/api/exploration-stopped")
-async def api_exploration_stopped() -> dict:
-    global state_running, state_lucky
+async def api_exploration_stopped(body: StopReasonBody = Body(default=StopReasonBody())) -> dict:
+    global state_running, state_lucky, state_stop_reason
     state_running = False
     state_lucky = False
+    state_stop_reason = body.reason or ""
     await broadcast("exploration_stopped", _state_payload())
     return {"ok": True}
 

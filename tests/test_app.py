@@ -80,3 +80,10 @@ def test_exploration_log():
     assert r2.json()["total_exp"] == 13
     assert "[C] 弱体の種" in r2.json()["drops"]
     assert r2.json()["drops_by_rank"].get("C") == 1
+
+
+def test_exploration_stopped_with_reason():
+    r = client.post("/api/exploration-stopped", json={"reason": "Lv100転生のため停止"})
+    assert r.status_code == 200
+    r2 = client.get("/api/state")
+    assert r2.json()["stop_reason"] == "Lv100転生のため停止"

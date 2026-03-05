@@ -4,13 +4,18 @@
 
 ・ホームで「探索する」→ モンスター画面で「街に戻る」を繰り返し
 ・Web通知サーバー(app.py)と連携: ラッキーチャンスを通知
+・Lv100転生メッセージ検知で強制停止
 ・自動探索終了後もブラウザは開いたまま。再度「自動探索開始」で再開可能
 """
 
+import argparse
 import asyncio
 import re
 import random
+import signal
+import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +24,35 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 
 import config  # type: ignore
 
+# ANSI色（ターミナル用）
+_COLORS = {
+    "reset": "\033[0m",
+    "red": "\033[91m",
+    "green": "\033[92m",
+    "yellow": "\033[93m",
+    "blue": "\033[94m",
+}
+
+_shutdown_requested = False
+
+
+def _colored(msg: str, color: str) -> str:
+    if sys.stdout.isatty() and color in _COLORS:
+        return f"{_COLORS[color]}{msg}{_COLORS['reset']}"
+    return msg
+
+
+def _log(msg: str, verbose_only: bool = False, level: str = "info") -> None:
+    if config.VERBOSE or not verbose_only:
+        if level == "error":
+            print(_colored(msg, "red"))
+        elif level == "warn":
+            print(_colored(msg, "yellow"))
+        elif level == "success":
+            print(_colored(msg, "green"))
+        else:
+            print(msg)
+
 
 def _cubic_bezier(t: float, p0: float, p1: float, p2: float, p3: float) -> float:
     """3次ベジェ曲線（人間の手の軌道に近い）"""
@@ -26,37 +60,49 @@ def _cubic_bezier(t: float, p0: float, p1: float, p2: float, p3: float) -> float
     return u**3 * p0 + 3 * u**2 * t * p1 + 3 * u * t**2 * p2 + t**3 * p3
 
 
-def _log(msg: str, verbose_only: bool = False) -> None:
-    if config.VERBOSE or not verbose_only:
-        print(msg)
+async def _get_page_text(page) -> str:
+    """ページテキストを安全に取得"""
+    try:
+        return await page.evaluate("() => document.body.innerText") or ""
+    except Exception:
+        return ""
+
+
+async def _check_force_stop(page) -> Optional[str]:
+    """Lv100転生等の強制停止トリガーをチェック。該当すれば理由を返す"""
+    text = await _get_page_text(page)
+    for pat in getattr(config, "FORCE_STOP_PATTERNS", ["あなたはLv100になりました", "転生してください"]):
+        if pat in text:
+            return f"Lv100転生のため停止（{pat}）"
+    return None
+
+
+async def _check_defeat(page) -> bool:
+    """敗北メッセージをチェック"""
+    text = await _get_page_text(page)
+    for pat in getattr(config, "DEFEAT_PATTERNS", ["敗北", "負けました"]):
+        if pat in text:
+            return True
+    return False
 
 
 async def _is_champion(page) -> bool:
     """〇〇階のチャンプです → 天空闘技場行けない"""
-    try:
-        text = await page.evaluate("() => document.body.innerText")
-        return "チャンプです" in (text or "")
-    except Exception:
-        return False
+    text = await _get_page_text(page)
+    return "チャンプです" in text
 
 
 def _extract_exploration_result(text: str) -> tuple[str, int, list[str]]:
-    """
-    勝利メッセージ・経験値・ドロップを抽出
-    例: 「自爆餅は勝利した。13の経験値を獲得した。[C] 弱体の種を手に入れた！」
-    戻り値: (message, exp, drops)
-    """
+    """勝利メッセージ・経験値・ドロップを抽出。戻り値: (message, exp, drops)"""
     message = ""
     exp = 0
     drops: list[str] = []
 
-    # 勝利＋経験値のまとまりを取得（〇〇は勝利した。Nの経験値を獲得した。）
     vic_exp = re.search(r"([^\n]+は勝利した[^\n]*?(\d+)\s*の経験値を獲得した[^\n]*?)(?:\n|$)", text)
     if vic_exp:
         message = vic_exp.group(1).strip()
         exp = int(vic_exp.group(2))
 
-    # 単体でも拾う
     if not message:
         vic_m = re.search(r"([^\n。]+は勝利した)", text)
         exp_m = re.search(r"(\d+)\s*の経験値を獲得した", text)
@@ -66,7 +112,6 @@ def _extract_exploration_result(text: str) -> tuple[str, int, list[str]]:
             exp = int(exp_m.group(1))
             message += f" {exp_m.group(1)}の経験値を獲得した。"
 
-    # ドロップ: [C] アイテム名を手に入れた など（[A-Z]はランク）
     for m in re.finditer(r"\[([A-Z])\]\s*([^を\n！]+)を手に入れた", text):
         drops.append(f"[{m.group(1)}] {m.group(2).strip()}")
 
@@ -75,7 +120,6 @@ def _extract_exploration_result(text: str) -> tuple[str, int, list[str]]:
 
 
 def _url_matches_success(url: str, expect: str | list[str]) -> bool:
-    """URLが成功条件を満たすか"""
     if isinstance(expect, str):
         return expect in url
     for pat in expect:
@@ -84,43 +128,48 @@ def _url_matches_success(url: str, expect: str | list[str]) -> bool:
     return False
 
 
+async def _find_button(page, selectors: list[str], timeout: int | None = None) -> Optional[any]:
+    """複数セレクタでフォールバック。テキストセレクタも試行"""
+    tout = timeout or config.BUTTON_TIMEOUT_MS
+    for sel in selectors:
+        try:
+            btn = page.locator(sel).first
+            await btn.wait_for(state="visible", timeout=tout)
+            return btn
+        except PlaywrightTimeout:
+            continue
+    return None
+
+
 async def _click_and_verify(page, locator, expect_url_contains: str | list[str]) -> bool:
-    """
-    クリック → 2秒待機 → 成功確認。失敗ならリトライ。
-    expect_url_contains: "home" または config.URL_AFTER_EXPLORE（探索/挑戦後）
-    """
+    """クリック → 2秒待機 → 成功確認。失敗ならリトライ"""
     expect = expect_url_contains
     if expect == "monster":
         expect = getattr(config, "URL_AFTER_EXPLORE", ["monster", "arena", "battle", "tower"])
+    max_retries = getattr(config, "CLICK_RETRY_COUNT", 10)
 
-    for attempt in range(10):
+    for attempt in range(max_retries):
         await human_like_click(page, locator)
         await asyncio.sleep(2.0)
         try:
             url = page.url or ""
             if _url_matches_success(url, expect):
                 return True
-            if isinstance(expect, list):
-                if "games-alchemist.com" in url and "/home/" not in url:
-                    return True
+            if isinstance(expect, list) and "games-alchemist.com" in url and "/home/" not in url:
+                return True
             await page.wait_for_load_state("domcontentloaded", timeout=3000)
             url = page.url or ""
-            if _url_matches_success(url, expect):
-                return True
-            if isinstance(expect, list) and "games-alchemist.com" in url and "/home/" not in url:
+            if _url_matches_success(url, expect) or (isinstance(expect, list) and "games-alchemist.com" in url and "/home/" not in url):
                 return True
         except Exception:
             pass
-        _log(f"  → クリック未反映（試行{attempt+1}/10）、2秒待機後にリトライ")
+        _log(f"  → クリック未反映（試行{attempt+1}/{max_retries}）、2秒待機後にリトライ", level="warn")
         await asyncio.sleep(2.0)
     return False
 
 
 async def human_like_click(page, locator) -> None:
-    """
-    人間らしいマウス動作：3次ベジェ曲線・オーバーシュート・微振動・可変速度
-    クリック位置はボタン内にクランプ
-    """
+    """人間らしいマウス動作"""
     await locator.wait_for(state="attached", timeout=config.TIMEOUT_MS)
     await locator.scroll_into_view_if_needed()
     await asyncio.sleep(random.uniform(0.08, 0.2))
@@ -130,13 +179,10 @@ async def human_like_click(page, locator) -> None:
         await locator.click()
         return
 
-    # クリック位置：ボタン内にクランプ（範囲外クリック防止）
     offset_x = random.gauss(0, box["width"] * 0.15)
     offset_y = random.gauss(0, box["height"] * 0.15)
-    target_x = box["x"] + box["width"] / 2 + offset_x
-    target_y = box["y"] + box["height"] / 2 + offset_y
-    target_x = max(box["x"] + 5, min(box["x"] + box["width"] - 5, target_x))
-    target_y = max(box["y"] + 5, min(box["y"] + box["height"] - 5, target_y))
+    target_x = max(box["x"] + 5, min(box["x"] + box["width"] - 5, box["x"] + box["width"] / 2 + offset_x))
+    target_y = max(box["y"] + 5, min(box["y"] + box["height"] - 5, box["y"] + box["height"] / 2 + offset_y))
 
     viewport = page.viewport_size or {"width": 1280, "height": 720}
     start_x = random.uniform(80, viewport["width"] - 80)
@@ -174,7 +220,6 @@ async def human_like_click(page, locator) -> None:
 
 
 async def _human_scroll_down(page, amount: Optional[int] = None) -> None:
-    """人間らしいスクロール（短時間で）"""
     if amount is None:
         amount = random.randint(250, 400)
     chunk = random.randint(100, 200)
@@ -189,7 +234,6 @@ async def _human_scroll_down(page, amount: Optional[int] = None) -> None:
 
 
 async def _human_scroll_to_bottom(page) -> None:
-    """ページ最下部までスクロール"""
     await page.evaluate(
         "window.scrollTo(0, Math.max(document.body.scrollHeight, document.documentElement.scrollHeight))"
     )
@@ -201,7 +245,6 @@ async def _human_scroll_to_bottom(page) -> None:
 
 
 async def _safe_goto_home(page, max_retries: int = 3) -> bool:
-    """ホームへ安全に遷移（ERR_ABORTED等をキャッチしてリトライ）"""
     for attempt in range(max_retries):
         try:
             await page.goto(config.HOME_URL, wait_until="domcontentloaded", timeout=15000)
@@ -209,23 +252,44 @@ async def _safe_goto_home(page, max_retries: int = 3) -> bool:
         except Exception as e:
             err_msg = str(e).lower()
             if "err_aborted" in err_msg or "aborted" in err_msg or "destroyed" in err_msg:
-                _log(f"  → 遷移失敗 (試行{attempt+1}/{max_retries})、待機してリトライ")
+                _log(f"  → 遷移失敗 (試行{attempt+1}/{max_retries})、待機してリトライ", level="warn")
                 await asyncio.sleep(random.uniform(1.0, 2.5))
                 continue
             raise
     return False
 
 
-async def _find_button(page, selectors: list[str], timeout: int = 2000):
-    """複数セレクタでフォールバックしてボタンを探す"""
-    for sel in selectors:
+async def _save_screenshot(page, prefix: str = "error") -> None:
+    """エラー時のスクリーンショット保存"""
+    if not getattr(config, "SAVE_SCREENSHOT_ON_ERROR", True):
+        return
+    try:
+        screenshot_dir = getattr(config, "SCREENSHOT_DIR", Path(__file__).parent / "screenshots")
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+        path = screenshot_dir / f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        await page.screenshot(path=path)
+        _log(f"  → スクリーンショット保存: {path}")
+    except Exception as e:
+        _log(f"  → スクリーンショット保存失敗: {e}", level="warn")
+
+
+async def _api_post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    json: dict,
+    max_retries: int = 3,
+) -> bool:
+    """API POSTを指数バックオフでリトライ"""
+    for attempt in range(max_retries):
         try:
-            btn = page.locator(sel).first
-            await btn.wait_for(state="visible", timeout=timeout)
-            return btn
-        except PlaywrightTimeout:
-            continue
-    return None
+            r = await client.post(url, json=json, timeout=config.HTTP_TIMEOUT)
+            if r.status_code == 200:
+                return True
+        except (httpx.ConnectError, httpx.TimeoutException):
+            pass
+        if attempt < max_retries - 1:
+            await asyncio.sleep(2**attempt)
+    return False
 
 
 async def _check_and_wait_lucky_chance(page, client: httpx.AsyncClient) -> bool:
@@ -238,7 +302,6 @@ async def _check_and_wait_lucky_chance(page, client: httpx.AsyncClient) -> bool:
             }"""
         )
     except Exception as e:
-        # ページ遷移中で実行コンテキストが破棄された場合など → ラッキーチャンスなしとして続行
         err_msg = str(e).lower()
         if "destroyed" in err_msg or "navigation" in err_msg or "target closed" in err_msg:
             return False
@@ -247,39 +310,23 @@ async def _check_and_wait_lucky_chance(page, client: httpx.AsyncClient) -> bool:
         return False
 
     _log("")
-    _log("★ ラッキーチャンス！ Web画面の「自動探索開始」を押して再開してください ★")
+    _log("★ ラッキーチャンス！ Web画面の「自動探索開始」を押して再開してください ★", level="success")
     base = config.BACKEND_URL.rstrip("/")
-    try:
-        await client.post(f"{base}/api/lucky-chance", timeout=config.HTTP_TIMEOUT)
-        backend_ok = True
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        _log(f"  (通知サーバー接続失敗: {e}。ターミナルで y 入力)")
-        backend_ok = False
+    await _api_post_with_retry(client, f"{base}/api/lucky-chance", {})
 
-    if backend_ok:
-        while True:
-            await asyncio.sleep(2)
-            try:
-                r = await client.get(f"{base}/api/check-go", timeout=config.HTTP_TIMEOUT)
-                if r.json().get("go"):
-                    break
-            except Exception:
-                pass
-    else:
-        def wait_input():
-            return input(">> ")
-
-        loop = asyncio.get_running_loop()
-        while True:
-            if (await loop.run_in_executor(None, wait_input)).strip().lower() == "y":
+    while True:
+        await asyncio.sleep(2)
+        try:
+            r = await client.get(f"{base}/api/check-go", timeout=config.HTTP_TIMEOUT)
+            if r.json().get("go"):
                 break
+        except Exception:
+            pass
 
-    _log("再開します。20秒後に探索から始めます。")
-    await asyncio.sleep(20)
-    try:
-        await client.post(f"{base}/api/exploration-started", timeout=config.HTTP_TIMEOUT)
-    except Exception:
-        pass
+    wait_sec = getattr(config, "LUCKY_CHANCE_WAIT_SEC", 20)
+    _log(f"再開します。{wait_sec}秒後に探索から始めます。")
+    await asyncio.sleep(wait_sec)
+    await _api_post_with_retry(client, f"{base}/api/exploration-started", {})
     return True
 
 
@@ -299,12 +346,27 @@ def _get_browser_executable() -> Optional[str]:
     return None
 
 
+async def _try_click_confirm(page) -> bool:
+    """確認/OKボタンを探してクリック"""
+    for sel in getattr(config, "SELECTOR_CONFIRM", []):
+        try:
+            btn = page.locator(sel).first
+            await btn.wait_for(state="visible", timeout=1500)
+            await human_like_click(page, btn)
+            return True
+        except PlaywrightTimeout:
+            continue
+    return False
+
+
 async def run_loop() -> None:
+    global _shutdown_requested
     limits = httpx.Limits(max_connections=4, keepalive_expiry=30.0)
     async with httpx.AsyncClient(limits=limits, timeout=config.HTTP_TIMEOUT) as http_client:
         async with async_playwright() as p:
             exec_path = _get_browser_executable()
             viewport = random.choice(config.VIEWPORT_OPTIONS)
+            pos = getattr(config, "WINDOW_POSITION", (0, 0))
             launch_opts = {
                 "user_data_dir": str(config.USER_DATA_DIR),
                 "headless": config.HEADLESS,
@@ -317,7 +379,7 @@ async def run_loop() -> None:
                     "--no-first-run",
                     "--no-default-browser-check",
                     "--disable-infobars",
-                    "--window-position=0,0",
+                    f"--window-position={pos[0]},{pos[1]}",
                     "--disable-extensions",
                     "--disable-popup-blocking",
                     "--mute-audio",
@@ -344,7 +406,7 @@ async def run_loop() -> None:
             try:
                 await http_client.get(f"{base}/api/check-go", timeout=2.0)
             except Exception:
-                _log("※Web通知なしで動作。ボタン操作は uvicorn app:app --port 8000 → http://localhost:8000")
+                _log("※Web通知なしで動作。uvicorn app:app --port 8000 → http://localhost:8000")
             _log("-" * 50)
             _log("ログインするまで待機。ログイン後「自動探索開始」を押すか、初回のみ5秒で自動開始")
             _log("終了: Ctrl+C")
@@ -359,7 +421,7 @@ async def run_loop() -> None:
                 btn = await _find_button(page, config.SELECTOR_EXPLORE, timeout=3000)
                 if btn:
                     logged_in = True
-                    _log("ログイン確認。Web画面で「自動探索開始」を押すまで待機")
+                    _log("ログイン確認。Web画面で「自動探索開始」を押すまで待機", level="success")
                 else:
                     now = time.monotonic()
                     if last_msg_at == 0 or (now - last_msg_at) > 10:
@@ -373,6 +435,8 @@ async def run_loop() -> None:
             try:
                 first_wait = True
                 while True:
+                    if _shutdown_requested:
+                        break
                     wait_start = time.monotonic()
                     started = False
                     while True:
@@ -393,47 +457,57 @@ async def run_loop() -> None:
                         continue
 
                     first_wait = False
-                    _log("自動探索を開始します。")
-                    try:
-                        await http_client.post(f"{base}/api/exploration-started", timeout=config.HTTP_TIMEOUT)
-                    except Exception:
-                        pass
+                    _log("自動探索を開始します。", level="success")
+                    await _api_post_with_retry(http_client, f"{base}/api/exploration-started", {})
 
                     count = 0
                     start_time = time.monotonic()
                     consecutive_errors = 0
 
                     while True:
+                        if _shutdown_requested:
+                            break
                         if config.MAX_LOOPS and count >= config.MAX_LOOPS:
                             _log(f"最大ループ数 {config.MAX_LOOPS} に達しました。")
                             break
 
-                        # 停止チェック（ループの最初＝前ループ完了後。押したらこのループは行わず停止）
+                        # 強制停止チェック（Lv100転生等）
+                        force_reason = await _check_force_stop(page)
+                        if force_reason:
+                            _log("")
+                            _log(f"★ {force_reason}", level="error")
+                            await _save_screenshot(page, "force_stop")
+                            await _api_post_with_retry(
+                                http_client,
+                                f"{base}/api/exploration-stopped",
+                                {"reason": force_reason},
+                            )
+                            break
+
                         if count > 0:
                             try:
                                 r = await http_client.get(f"{base}/api/check-stop", timeout=3.0)
                                 if r.json().get("stop"):
                                     _log("")
-                                    _log("自動探索を停止しました。ブラウザは開いたままです。")
-                                    try:
-                                        await http_client.post(f"{base}/api/exploration-stopped", timeout=config.HTTP_TIMEOUT)
-                                    except Exception:
-                                        pass
+                                    _log("自動探索を停止しました。ブラウザは開いたままです。", level="success")
+                                    await _api_post_with_retry(http_client, f"{base}/api/exploration-stopped", {})
                                     break
                             except Exception:
                                 pass
 
                         count += 1
-                        elapsed = time.monotonic() - start_time
+                        loop_start = time.monotonic()
+                        elapsed = loop_start - start_time
                         try:
                             with open(loop_count_file, "w") as f:
                                 f.write(str(count))
                         except Exception:
                             pass
-                        try:
-                            await http_client.post(f"{base}/api/exploration-log", json={"loop_count": count}, timeout=config.HTTP_TIMEOUT)
-                        except Exception:
-                            pass
+                        await _api_post_with_retry(
+                            http_client,
+                            f"{base}/api/exploration-log",
+                            {"loop_count": count, "stats": {"consecutive_errors": consecutive_errors}},
+                        )
 
                         _log(f"[{count}] ループ開始 (経過: {elapsed:.0f}秒)")
                         wmin, wmax = config.WAIT_START
@@ -445,12 +519,13 @@ async def run_loop() -> None:
                         wmin, wmax = config.WAIT_AFTER_HOME_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
 
-                        # 〇〇階のチャンプです → 天空闘技場行けないので最初に判定
-                        if await _is_champion(page):
+                        if not getattr(config, "CHALLENGE_ARENA", True):
+                            challenge_btn = None
+                        elif await _is_champion(page):
                             _log("  → チャンプのため天空闘技場はスキップ")
                             challenge_btn = None
                         else:
-                            challenge_btn = await _find_button(page, config.SELECTOR_CHALLENGE, timeout=2000)
+                            challenge_btn = await _find_button(page, config.SELECTOR_CHALLENGE)
 
                         clicked = False
                         if challenge_btn:
@@ -458,26 +533,29 @@ async def run_loop() -> None:
                             clicked = await _click_and_verify(page, challenge_btn, "monster")
 
                         if not clicked:
-                            explore_btn = await _find_button(page, config.SELECTOR_EXPLORE, timeout=2000)
+                            explore_btn = await _find_button(page, config.SELECTOR_EXPLORE)
                             if explore_btn:
                                 _log("  → 探索するをクリック")
                                 clicked = await _click_and_verify(page, explore_btn, "monster")
                             else:
-                                _log("  → 探索ボタンが見つかりません。ホームへ戻ります。")
+                                _log("  → 探索ボタンが見つかりません。ホームへ戻ります。", level="warn")
                                 consecutive_errors += 1
+                                await _save_screenshot(page, "no_explore")
                                 if consecutive_errors >= 5:
-                                    _log("  ※連続エラーが多いため停止を検討してください")
+                                    _log("  ※連続エラーが多いため停止を検討してください", level="error")
                                 await _safe_goto_home(page)
                                 continue
 
                         if not clicked:
-                            _log("  → クリックが反映されませんでした。ホームへ戻ります。")
+                            _log("  → クリックが反映されませんでした。ホームへ戻ります。", level="warn")
+                            await _save_screenshot(page, "click_fail")
                             await _safe_goto_home(page)
                             continue
 
                         consecutive_errors = 0
                         await page.wait_for_load_state("domcontentloaded")
                         await asyncio.sleep(random.uniform(0.4, 0.8))
+                        await _try_click_confirm(page)
                         if random.random() < 0.04:
                             await asyncio.sleep(random.uniform(0.2, 0.5))
 
@@ -496,31 +574,41 @@ async def run_loop() -> None:
                         wmin, wmax = config.WAIT_AFTER_MONSTER_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
 
-                        # 探索結果（勝利・経験値・ドロップ）を抽出してWebに送信
+                        if await _check_defeat(page):
+                            _log("  → 敗北を検知。ホームへ戻ります。", level="warn")
+                            await _safe_goto_home(page)
+                            continue
+
                         try:
-                            body_text = await page.evaluate("() => document.body.innerText")
-                            msg, exp_val, new_drops = _extract_exploration_result(body_text or "")
+                            body_text = await _get_page_text(page)
+                            msg, exp_val, new_drops = _extract_exploration_result(body_text)
                             if msg or new_drops or exp_val > 0:
-                                try:
-                                    await http_client.post(
-                                        f"{base}/api/exploration-log",
-                                        json={"loop_count": count, "message": msg, "exp": exp_val, "drops": new_drops},
-                                        timeout=config.HTTP_TIMEOUT,
-                                    )
-                                except Exception:
-                                    pass
-                        except Exception:
-                            pass
+                                loop_time = time.monotonic() - loop_start
+                                await _api_post_with_retry(
+                                    http_client,
+                                    f"{base}/api/exploration-log",
+                                    {
+                                        "loop_count": count,
+                                        "message": msg,
+                                        "exp": exp_val,
+                                        "drops": new_drops,
+                                        "stats": {"loop_time_sec": round(loop_time, 1), "consecutive_errors": 0},
+                                    },
+                                )
+                        except Exception as e:
+                            _log(f"  → 探索結果抽出失敗: {e}", level="warn")
 
                         return_btn = await _find_button(page, config.SELECTOR_RETURN, timeout=3000)
                         if not return_btn:
-                            _log("  → 街に戻るボタンが見つかりません。ホームへ戻ります。")
+                            _log("  → 街に戻るボタンが見つかりません。ホームへ戻ります。", level="warn")
+                            await _save_screenshot(page, "no_return")
                             await _safe_goto_home(page)
                             continue
 
                         await _click_and_verify(page, return_btn, "home")
                         await page.wait_for_load_state("domcontentloaded")
                         await asyncio.sleep(random.uniform(0.4, 0.8))
+                        await _try_click_confirm(page)
 
                         if await _check_and_wait_lucky_chance(page, http_client):
                             continue
@@ -532,11 +620,54 @@ async def run_loop() -> None:
 
             except KeyboardInterrupt:
                 _log("\n終了しました。")
+            except Exception as e:
+                _log(f"\n予期しないエラー: {e}", level="error")
+                try:
+                    await _save_screenshot(page, "crash")
+                except Exception:
+                    pass
+                raise
             finally:
-                await context.close()
+                try:
+                    await context.close()
+                except Exception:
+                    pass
+
+
+def _sig_handler(signum: int, frame) -> None:
+    global _shutdown_requested
+    _shutdown_requested = True
+    _log("\n終了シグナルを受信。ループ完了後に停止します...")
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="あるけみすと 自動ダンジョン探索")
+    parser.add_argument("--headless", action="store_true", help="ヘッドレスモード")
+    parser.add_argument("--max-loops", type=int, default=0, help="最大ループ数 (0=無制限)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="詳細ログ")
+    args = parser.parse_args()
+
+    if args.headless:
+        import os
+        os.environ["HEADLESS"] = "1"
+    if args.max_loops:
+        import os
+        os.environ["MAX_LOOPS"] = str(args.max_loops)
+    if args.verbose:
+        import os
+        os.environ["VERBOSE"] = "1"
+
+    import config as _config
+    if args.headless:
+        _config.HEADLESS = True
+    if args.max_loops:
+        _config.MAX_LOOPS = args.max_loops
+    if args.verbose:
+        _config.VERBOSE = True
+
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+
     asyncio.run(run_loop())
 
 
