@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from auto_click import _extract_exploration_result, _url_matches_success
+from auto_click import _extract_exploration_result, _url_matches_success, _is_lucky_chance_text
 
 
 def test_extract_exploration_result_victory():
@@ -38,3 +38,11 @@ def test_url_matches_success_list():
     assert _url_matches_success("https://example.com/monster/", ["monster", "arena"])
     assert _url_matches_success("https://example.com/arena/", ["monster", "arena"])
     assert not _url_matches_success("https://example.com/other/", ["monster", "arena"])
+
+
+def test_is_lucky_chance_text():
+    assert _is_lucky_chance_text("LUCKY CHANCE!")
+    assert _is_lucky_chance_text("Lucky Chance")
+    assert _is_lucky_chance_text("LUCKYCHANCE")
+    assert not _is_lucky_chance_text("ラッキーチャンスが発生しました！")  # 日本語は検知しない
+    assert not _is_lucky_chance_text("通常の戦闘結果")

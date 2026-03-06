@@ -212,9 +212,10 @@ def _state_payload() -> dict:
 
 @app.post("/api/exploration-started")
 async def api_exploration_started() -> dict:
-    global state_running, state_lucky, state_session_started_at
+    global state_running, state_lucky, state_session_started_at, state_stop_reason
     state_running = True
     state_lucky = False
+    state_stop_reason = ""  # 転生後に再開した場合はクリア
     state_session_started_at = datetime.now().isoformat()
     await broadcast("exploration_started", _state_payload())
     return {"ok": True}

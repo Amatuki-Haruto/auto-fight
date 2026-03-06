@@ -67,13 +67,20 @@ async def _get_page_text(page) -> str:
         return ""
 
 
-async def _check_force_stop(page) -> Optional[str]:
-    """Lv100転生等の強制停止トリガーをチェック。該当すれば理由を返す"""
-    text = await _get_page_text(page)
+def _text_has_force_stop(text: str) -> Optional[str]:
+    """テキストにLv100転生等の強制停止トリガーが含まれるか。該当すれば理由を返す"""
+    if not text:
+        return None
     for pat in getattr(config, "FORCE_STOP_PATTERNS", ["あなたはLv100になりました", "転生してください"]):
         if pat in text:
             return f"Lv100転生のため停止（{pat}）"
     return None
+
+
+async def _check_force_stop(page) -> Optional[str]:
+    """Lv100転生等の強制停止トリガーをチェック。該当すれば理由を返す"""
+    text = await _get_page_text(page)
+    return _text_has_force_stop(text)
 
 
 async def _is_champion(page) -> bool:
@@ -139,7 +146,11 @@ async def _click_and_verify(page, locator, expect_url_contains: str | list[str])
     max_retries = getattr(config, "CLICK_RETRY_COUNT", 10)
 
     for attempt in range(max_retries):
-        await human_like_click(page, locator)
+        try:
+            await human_like_click(page, locator)
+        except PlaywrightTimeout:
+            _log(f"  → 要素が見つかりません（試行{attempt+1}/{max_retries}）。ホームへ戻ります。", level="warn")
+            return False
         await asyncio.sleep(2.0)
         try:
             url = page.url or ""
@@ -282,22 +293,24 @@ async def _api_post_with_retry(
     return False
 
 
-async def _check_and_wait_lucky_chance(page, client: httpx.AsyncClient) -> bool:
-    """ラッキーチャンス検知→Web通知→再開待ち"""
-    try:
-        lucky = await page.evaluate(
-            """() => {
-                const t = document.body.innerText.toUpperCase();
-                return (t.includes('LUCKY') && t.includes('CHANCE')) || t.includes('LUCKYCHANCE');
-            }"""
-        )
-    except Exception as e:
-        err_msg = str(e).lower()
-        if "destroyed" in err_msg or "navigation" in err_msg or "target closed" in err_msg:
-            return False
-        raise
-    if not lucky:
-        return False
+def _is_lucky_chance_text(text: str) -> bool:
+    """ラッキーチャンス判定（英語のみ：LUCKY+CHANCE）"""
+    t = text.upper()
+    return ("LUCKY" in t and "CHANCE" in t) or "LUCKYCHANCE" in t
+
+
+async def _check_and_wait_lucky_chance(page, client: httpx.AsyncClient, *, already_detected: bool = False) -> bool:
+    """ラッキーチャンス検知→Web通知→再開待ち。already_detected=True ならテキストチェックをスキップ"""
+    if not already_detected:
+        try:
+            text = await _get_page_text(page)
+            if not _is_lucky_chance_text(text):
+                return False
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "destroyed" in err_msg or "navigation" in err_msg or "target closed" in err_msg:
+                return False
+            raise
 
     _log("")
     _log("★ ラッキーチャンス！ Web画面の「自動探索開始」を押して再開してください ★", level="success")
@@ -559,6 +572,7 @@ async def run_loop() -> None:
                         wmin, wmax = config.WAIT_AFTER_MONSTER_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
 
+                        body_text = ""
                         try:
                             body_text = await _get_page_text(page)
                             msg, exp_val, new_drops = _extract_exploration_result(body_text)
@@ -578,6 +592,22 @@ async def run_loop() -> None:
                         except Exception as e:
                             _log(f"  → 探索結果抽出失敗: {e}", level="warn")
 
+                        # 戦闘結果テキストでLv100転生をチェック
+                        force_reason = _text_has_force_stop(body_text)
+                        if force_reason:
+                            _log("")
+                            _log(f"★ {force_reason}", level="error")
+                            await _save_screenshot(page, "force_stop")
+                            await _api_post_with_retry(
+                                http_client,
+                                f"{base}/api/exploration-stopped",
+                                {"reason": force_reason},
+                            )
+                            break
+
+                        # 戦闘結果でラッキーチャンス検知しても街に戻るを優先（後で処理）
+                        lucky_detected = bool(body_text and _is_lucky_chance_text(body_text))
+
                         return_btn = await _find_button(page, config.SELECTOR_RETURN, timeout=3000)
                         if not return_btn:
                             _log("  → 街に戻るボタンが見つかりません。ホームへ戻ります。", level="warn")
@@ -596,7 +626,20 @@ async def run_loop() -> None:
                         await asyncio.sleep(random.uniform(0.4, 0.8))
                         await _try_click_confirm(page)
 
-                        if await _check_and_wait_lucky_chance(page, http_client):
+                        # 街に戻った後のホーム画面でLv100転生をチェック
+                        force_reason = await _check_force_stop(page)
+                        if force_reason:
+                            _log("")
+                            _log(f"★ {force_reason}", level="error")
+                            await _save_screenshot(page, "force_stop")
+                            await _api_post_with_retry(
+                                http_client,
+                                f"{base}/api/exploration-stopped",
+                                {"reason": force_reason},
+                            )
+                            break
+
+                        if await _check_and_wait_lucky_chance(page, http_client, already_detected=lucky_detected):
                             continue
 
                         wmin, wmax = config.WAIT_AFTER_RETURN
