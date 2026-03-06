@@ -33,11 +33,11 @@ BRAVE_PATH = os.environ.get(
     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
 )
 
-# 待機時間（秒）- プリセット: fast, normal, slow
+# 待機時間（秒）- プリセット: fast, normal, slow（1周あたり約20〜23秒を想定）
 _WAIT_PRESET = {
-    "fast": {"start": (0.1, 0.3), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (14.0, 17.0)},
-    "normal": {"start": (0.2, 0.5), "home_scroll": (0.15, 0.4), "monster_scroll": (0.15, 0.4), "return": (16.0, 19.0)},
-    "slow": {"start": (0.3, 0.8), "home_scroll": (0.2, 0.5), "monster_scroll": (0.2, 0.5), "return": (18.0, 21.0)},
+    "fast": {"start": (0.1, 0.3), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (2.0, 5.0)},
+    "normal": {"start": (0.15, 0.4), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (2.5, 5.5)},
+    "slow": {"start": (0.2, 0.5), "home_scroll": (0.15, 0.4), "monster_scroll": (0.15, 0.4), "return": (3.0, 6.0)},
 }
 _WAIT_PRESET_NAME = os.environ.get("WAIT_PRESET", "normal")
 _PRESET = _WAIT_PRESET.get(_WAIT_PRESET_NAME, _WAIT_PRESET["normal"])

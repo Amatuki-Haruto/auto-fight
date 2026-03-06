@@ -556,17 +556,6 @@ async def run_loop() -> None:
                         if random.random() < 0.04:
                             await asyncio.sleep(random.uniform(0.2, 0.5))
 
-                        if await _check_and_wait_lucky_chance(page, http_client):
-                            await _human_scroll_to_bottom(page)
-                            wmin, wmax = config.WAIT_AFTER_MONSTER_SCROLL
-                            await asyncio.sleep(random.uniform(wmin, wmax))
-                            return_btn = await _find_button(page, config.SELECTOR_RETURN, timeout=3000)
-                            if return_btn:
-                                await _click_and_verify(page, return_btn, "home")
-                            else:
-                                await _safe_goto_home(page)
-                            continue
-
                         await _human_scroll_to_bottom(page)
                         wmin, wmax = config.WAIT_AFTER_MONSTER_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
@@ -597,7 +586,13 @@ async def run_loop() -> None:
                             await _safe_goto_home(page)
                             continue
 
-                        await _click_and_verify(page, return_btn, "home")
+                        try:
+                            await _click_and_verify(page, return_btn, "home")
+                        except PlaywrightTimeout:
+                            _log("  → 街に戻るクリックでタイムアウト。ホームへ戻ります。", level="warn")
+                            await _save_screenshot(page, "return_timeout")
+                            await _safe_goto_home(page)
+                            continue
                         await page.wait_for_load_state("domcontentloaded")
                         await asyncio.sleep(random.uniform(0.4, 0.8))
                         await _try_click_confirm(page)

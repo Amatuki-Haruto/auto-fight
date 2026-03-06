@@ -1,0 +1,18 @@
+# Docker ビルドで除外するファイル
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+browser_data
+screenshots
+logs
+*.md
+tests
+auto_click.py
+run_auto_click.py
+requirements-local.txt
+.env
+fly.toml
+.dockerignore

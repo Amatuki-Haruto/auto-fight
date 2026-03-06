@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 あるけみすと 自動探索 - Web通知サーバー
-Renderデプロイ用。軽量・高速。
+Fly.io 等にデプロイ可能。軽量・高速。
 """
 
 import asyncio

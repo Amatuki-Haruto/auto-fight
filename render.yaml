@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: arukemisuto-autoclick
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python run_server.py
-    healthCheckPath: /health
