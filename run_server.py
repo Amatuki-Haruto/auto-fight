@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Fly.io 等デプロイ用: Web サーバー起動エントリーポイント
+Render 等デプロイ用: Web サーバー起動エントリーポイント
 """
 import os
 import uvicorn

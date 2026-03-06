@@ -17,7 +17,6 @@ BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
 # URL
 HOME_URL = "https://games-alchemist.com/home/"
-MONSTER_URL = "https://games-alchemist.com/monster/"
 
 # クリック成功判定: 探索/挑戦後に期待するURLに含まれる文字（複数候補）
 URL_AFTER_EXPLORE = ["monster", "arena", "battle", "tower"]
@@ -25,7 +24,6 @@ URL_AFTER_EXPLORE = ["monster", "arena", "battle", "tower"]
 # パス
 USER_DATA_DIR = Path(__file__).parent / "browser_data"
 SCREENSHOT_DIR = Path(__file__).parent / "screenshots"
-LOG_DIR = Path(__file__).parent / "logs"
 
 # ブラウザ（環境変数BROWSER_PATHで上書き可）
 BRAVE_PATH = os.environ.get(
@@ -96,7 +94,6 @@ MAX_LOOPS = int(os.environ.get("MAX_LOOPS", 0))  # 0=無制限
 VERBOSE = os.environ.get("VERBOSE", "").lower() in ("1", "true", "yes")
 CHALLENGE_ARENA = os.environ.get("CHALLENGE_ARENA", "1").lower() in ("1", "true", "yes")
 SAVE_SCREENSHOT_ON_ERROR = os.environ.get("SAVE_SCREENSHOT_ON_ERROR", "1").lower() in ("1", "true", "yes")
-AUTO_RESTART = os.environ.get("AUTO_RESTART", "0").lower() in ("1", "true", "yes")
 
 # 強制停止トリガー（画面上に表示されたら停止）
 FORCE_STOP_PATTERNS = [

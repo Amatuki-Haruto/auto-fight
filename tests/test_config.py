@@ -1,5 +1,4 @@
 """config モジュールのテスト"""
-import pytest
 
 
 def test_config_import():

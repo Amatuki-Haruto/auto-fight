@@ -1,7 +1,4 @@
 """auto_click.py のユニットテスト"""
-import pytest
-
-# モジュールの関数をテストするためインポート
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))

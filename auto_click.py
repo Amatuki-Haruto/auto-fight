@@ -30,7 +30,6 @@ _COLORS = {
     "red": "\033[91m",
     "green": "\033[92m",
     "yellow": "\033[93m",
-    "blue": "\033[94m",
 }
 
 _shutdown_requested = False
@@ -633,16 +632,6 @@ def main() -> None:
     parser.add_argument("--max-loops", type=int, default=0, help="最大ループ数 (0=無制限)")
     parser.add_argument("--verbose", "-v", action="store_true", help="詳細ログ")
     args = parser.parse_args()
-
-    if args.headless:
-        import os
-        os.environ["HEADLESS"] = "1"
-    if args.max_loops:
-        import os
-        os.environ["MAX_LOOPS"] = str(args.max_loops)
-    if args.verbose:
-        import os
-        os.environ["VERBOSE"] = "1"
 
     import config as _config
     if args.headless:

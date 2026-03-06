@@ -16,9 +16,6 @@
   --accent2:#58a6ff;
   --success:#3fb950;
   --danger:#f85149;
-  --gold:#ffd700;
-  --silver:#c0c0c0;
-  --bronze:#cd7f32;
   --radius:12px;
   --shadow:0 8px 32px rgba(0,0,0,.5);
 }
@@ -42,9 +39,6 @@ h1 .icon{font-size:1.8rem}
 .stat{background:rgba(0,0,0,.25);border-radius:10px;padding:1rem;text-align:center}
 .stat .val{font-size:1.8rem;font-weight:700;color:var(--accent2)}
 .stat .label{font-size:.75rem;color:var(--muted);margin-top:.2rem}
-.progress-wrap{margin-top:1rem;height:6px;background:rgba(255,255,255,.08);border-radius:3px;overflow:hidden}
-.progress-bar{height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent));border-radius:3px;animation:progress 20s linear infinite}
-@keyframes progress{0%{width:0%}100%{width:100%}}
 .btns{display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap}
 .btn{flex:1;min-width:130px;padding:.9rem 1.1rem;font-size:.95rem;font-weight:600;border:none;border-radius:10px;cursor:pointer;transition:transform .15s,box-shadow .15s;font-family:inherit}
 .btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
@@ -97,8 +91,6 @@ h1 .icon{font-size:1.8rem}
 <div class="stat"><div class="val" id="statDrops">0</div><div class="label">ドロップ数</div></div>
 </div>
 
-<div class="progress-wrap" id="progressWrap" style="display:none"><div class="progress-bar" id="progressBar"></div></div>
-
 <div class="btns">
 <button type="button" class="btn btn-start" id="startBtn">▶ 自動探索開始</button>
 <button type="button" class="btn btn-stop" id="stopBtn" disabled>■ 停止</button>
@@ -138,7 +130,6 @@ h1 .icon{font-size:1.8rem}
 <script>
 const $=e=>document.querySelector(e),st=$('#status'),sb=$('#startBtn'),sp=$('#stopBtn'),tb=$('#themeBtn');
 const statLoop=$('#statLoop'),statTime=$('#statTime'),statExp=$('#statExp'),statDrops=$('#statDrops');
-const progressWrap=$('#progressWrap'),progressBar=$('#progressBar');
 const lastMsg=$('#lastMessage'),lastMsgText=$('#lastMsgText'),lastMsgDrops=$('#lastMsgDrops'),noResult=$('#noResult');
 const dropRanks=$('#dropRanks'),dropsList=$('#dropsList'),activityLog=$('#activityLog'),off=$('#offlineMsg');
 
@@ -176,9 +167,9 @@ function setUIFromState(d){
   const run=d.running,lucky=d.lucky;
   if(d.stop_reason){stopReasonEl.style.display='block';stopReasonEl.textContent='⚠ '+d.stop_reason;stopReasonEl.style.color='var(--danger)'}
   else{stopReasonEl.style.display='none'}
-  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.removeAttribute('disabled');sp.disabled=false;progressWrap.style.display='block'}
-  else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false;progressWrap.style.display='block'}
-  else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','');progressWrap.style.display='none'}
+  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.removeAttribute('disabled');sp.disabled=false}
+  else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false}
+  else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','')}
 
   statLoop.textContent=d.loop_count||0;
   statExp.textContent=(d.total_exp||0).toLocaleString();
