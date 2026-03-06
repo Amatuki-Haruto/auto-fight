@@ -349,6 +349,21 @@ def _get_browser_executable() -> Optional[str]:
     return None
 
 
+async def _click_refresh_button(page) -> bool:
+    """左上の「更新」ボタンをクリック（停止後の再開時にゲーム状態を更新）"""
+    for sel in getattr(config, "SELECTOR_REFRESH", []):
+        try:
+            btn = page.locator(sel).first
+            await btn.wait_for(state="visible", timeout=2000)
+            await human_like_click(page, btn)
+            await page.wait_for_load_state("domcontentloaded", timeout=5000)
+            await asyncio.sleep(random.uniform(0.5, 1.0))
+            return True
+        except PlaywrightTimeout:
+            continue
+    return False
+
+
 async def _try_click_confirm(page) -> bool:
     """確認/OKボタンを探してクリック"""
     for sel in getattr(config, "SELECTOR_CONFIRM", []):
@@ -434,6 +449,7 @@ async def run_loop() -> None:
 
             await asyncio.sleep(5)
             loop_count_file = config.USER_DATA_DIR.parent / ".loop_count"
+            needs_refresh = False  # 停止後の再開時に「更新」を押す
 
             try:
                 first_wait = True
@@ -466,6 +482,13 @@ async def run_loop() -> None:
                         continue
 
                     first_wait = False
+                    if needs_refresh:
+                        if await _click_refresh_button(page):
+                            _log("  → 更新ボタンをクリック", level="success")
+                            await page.wait_for_load_state("domcontentloaded")
+                            await asyncio.sleep(random.uniform(1.0, 2.0))
+                        needs_refresh = False
+
                     _log("自動探索を開始します。", level="success")
                     await _api_post_with_retry(http_client, f"{base}/api/exploration-started", {})
 
@@ -478,6 +501,7 @@ async def run_loop() -> None:
                             break
                         if config.MAX_LOOPS and count >= config.MAX_LOOPS:
                             _log(f"最大ループ数 {config.MAX_LOOPS} に達しました。")
+                            needs_refresh = True
                             break
 
                         # 強制停止チェック（Lv100転生等）
@@ -491,6 +515,7 @@ async def run_loop() -> None:
                                 f"{base}/api/exploration-stopped",
                                 {"reason": force_reason},
                             )
+                            needs_refresh = True
                             break
 
                         if count > 0:
@@ -500,6 +525,7 @@ async def run_loop() -> None:
                                     _log("")
                                     _log("自動探索を停止しました。ブラウザは開いたままです。", level="success")
                                     await _api_post_with_retry(http_client, f"{base}/api/exploration-stopped", {})
+                                    needs_refresh = True
                                     break
                             except Exception:
                                 pass
@@ -603,6 +629,7 @@ async def run_loop() -> None:
                                 f"{base}/api/exploration-stopped",
                                 {"reason": force_reason},
                             )
+                            needs_refresh = True
                             break
 
                         # 戦闘結果でラッキーチャンス検知しても街に戻るを優先（後で処理）
@@ -637,6 +664,7 @@ async def run_loop() -> None:
                                 f"{base}/api/exploration-stopped",
                                 {"reason": force_reason},
                             )
+                            needs_refresh = True
                             break
 
                         if await _check_and_wait_lucky_chance(page, http_client, already_detected=lucky_detected):

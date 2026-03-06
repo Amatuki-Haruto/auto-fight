@@ -72,6 +72,13 @@ SELECTOR_CONFIRM = [
     'button:has-text("確認")',
     'button:has-text("OK")',
 ]
+# 停止後の再開時に押す「更新」ボタン（左上）
+SELECTOR_REFRESH = [
+    'a:has-text("更新")',
+    'button:has-text("更新")',
+    'input[type="submit"][value="更新"]',
+    '[href*="home"]:has-text("更新")',
+]
 
 # 解像度オプション
 VIEWPORT_OPTIONS = [
