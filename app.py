@@ -6,6 +6,8 @@ Render 等にデプロイ可能。軽量・高速。
 
 import asyncio
 import json
+import os
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -34,12 +36,16 @@ state_drops: list[str] = []
 state_session_started_at: str | None = None  # ISO形式
 state_total_exp: int = 0
 state_drops_by_rank: dict[str, int] = {}  # {"S": 1, "A": 2, ...}
-state_activity_log: list[dict] = []  # 直近のアクティビティ [{loop, msg, drops, at}, ...]
+state_activity_log: deque = deque(maxlen=20)  # 直近のアクティビティ [{loop, msg, drops, at}, ...]
 state_stop_reason: str = ""  # 強制停止理由（転生等）
 state_stats: dict = {}  # 統計（連続エラー数等）
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_ACTIVITY_LOG = 20
+LUCKY_CHANCE_WAIT_SEC = int(os.environ.get("LUCKY_CHANCE_WAIT_SEC", 20))
+
+# index.html キャッシュ（起動時に読み込み）
+_cached_index_html: str | None = None
 
 
 async def broadcast(event: str, data: dict) -> None:
@@ -67,12 +73,21 @@ async def health() -> dict:
     return {"status": "ok", "sse_clients": len(sse_clients)}
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index() -> HTMLResponse:
+def _load_index_html() -> str:
+    """index.html を読み込みキャッシュ（本番で毎回読まない）"""
+    global _cached_index_html
+    if _cached_index_html is not None:
+        return _cached_index_html
     html_path = STATIC_DIR / "index.html"
     if html_path.exists():
-        return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
-    return HTMLResponse(content=_fallback_html())
+        _cached_index_html = html_path.read_text(encoding="utf-8")
+        return _cached_index_html
+    return _fallback_html()
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    return HTMLResponse(content=_load_index_html())
 
 
 def _fallback_html() -> str:
@@ -96,9 +111,10 @@ async def api_state() -> dict:
         "session_started_at": state_session_started_at,
         "total_exp": state_total_exp,
         "drops_by_rank": state_drops_by_rank.copy(),
-        "activity_log": state_activity_log.copy(),
+        "activity_log": list(state_activity_log),
         "stop_reason": state_stop_reason,
         "stats": state_stats.copy(),
+        "lucky_chance_wait_sec": LUCKY_CHANCE_WAIT_SEC,
     }
 
 
@@ -134,22 +150,10 @@ async def api_exploration_log(body: ExplorationLogBody) -> dict:
             state_drops_by_rank[rk] = state_drops_by_rank.get(rk, 0) + 1
     if body.message or body.drops or body.exp > 0:
         entry = {"loop": state_loop_count, "msg": body.message, "drops": body.drops or [], "exp": body.exp, "at": datetime.now().isoformat()}
-        state_activity_log.insert(0, entry)
-        state_activity_log = state_activity_log[:MAX_ACTIVITY_LOG]
+        state_activity_log.appendleft(entry)
     if body.stats:
         state_stats.update(body.stats)
-    payload = {
-        "running": state_running,
-        "lucky": state_lucky,
-        "loop_count": state_loop_count,
-        "message": state_last_message,
-        "drops": state_drops.copy(),
-        "total_exp": state_total_exp,
-        "drops_by_rank": state_drops_by_rank.copy(),
-        "activity_log": state_activity_log.copy(),
-        "session_started_at": state_session_started_at,
-    }
-    await broadcast("exploration_log", payload)
+    await broadcast("exploration_log", _state_payload())
     return {"ok": True}
 
 
@@ -196,7 +200,10 @@ async def api_check_stop() -> dict:
 
 
 def _state_payload() -> dict:
+    """SSEブロードキャスト用の完全な状態（running/lucky を含む）"""
     return {
+        "running": state_running,
+        "lucky": state_lucky,
         "at": datetime.now().isoformat(),
         "loop_count": state_loop_count,
         "message": state_last_message,
@@ -204,9 +211,10 @@ def _state_payload() -> dict:
         "session_started_at": state_session_started_at,
         "total_exp": state_total_exp,
         "drops_by_rank": state_drops_by_rank.copy(),
-        "activity_log": state_activity_log.copy(),
+        "activity_log": list(state_activity_log),
         "stop_reason": state_stop_reason,
         "stats": state_stats.copy(),
+        "lucky_chance_wait_sec": LUCKY_CHANCE_WAIT_SEC,
     }
 
 

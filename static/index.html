@@ -152,6 +152,13 @@ function fmtElapsed(ms){
   return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
 }
 
+function escapeHtml(s){
+  if(typeof s!=='string')return'';
+  const div=document.createElement('div');
+  div.textContent=s;
+  return div.innerHTML;
+}
+
 function rankClass(s){
   const m=s.match(/^\[([A-Z])\]/);
   return m?m[1]:'?';
@@ -159,7 +166,7 @@ function rankClass(s){
 
 function renderDropTag(d){
   const c=rankClass(d);
-  return'<span class="'+c+'">'+d+'</span>';
+  return'<span class="'+c+'">'+escapeHtml(d)+'</span>';
 }
 
 const stopReasonEl=$('#stopReason');
@@ -167,8 +174,9 @@ function setUIFromState(d){
   const run=d.running,lucky=d.lucky;
   if(d.stop_reason){stopReasonEl.style.display='block';stopReasonEl.textContent='⚠ '+d.stop_reason;stopReasonEl.style.color='var(--danger)'}
   else{stopReasonEl.style.display='none'}
-  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で20秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.removeAttribute('disabled');sp.disabled=false}
-  else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.removeAttribute('disabled');sp.disabled=false}
+  const waitSec=d.lucky_chance_wait_sec||20;
+  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で'+waitSec+'秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=false}
+  else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.disabled=false}
   else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','')}
 
   statLoop.textContent=d.loop_count||0;
@@ -178,7 +186,7 @@ function setUIFromState(d){
   if(!run&&!goPending){clientStartMs=null;if(timerId){clearInterval(timerId);timerId=null}}
   else if(run){goPending=false;if(clientStartMs==null&&d.session_started_at)clientStartMs=new Date(d.session_started_at).getTime()}
   if(timerId)clearInterval(timerId);
-  if(clientStartMs!=null)timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),1000);
+  if(clientStartMs!=null)timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),TIMER_INTERVAL_MS);
   statTime.textContent=fmtElapsed(clientStartMs!=null?Date.now()-clientStartMs:null);
 
   const byRank=d.drops_by_rank||{};
@@ -192,26 +200,28 @@ function setUIFromState(d){
   else if(d.last_message){noResult.style.display='none';lastMsg.style.display='flex';$('#loopCount').textContent='';lastMsgText.textContent=d.last_message;lastMsgDrops.innerHTML=''}
   else{noResult.style.display='block';lastMsg.style.display='none'}
 
-  activityLog.innerHTML=(d.activity_log||[]).slice(0,10).map(a=>'<div class="activity-item"><span class="loop">#'+a.loop+'</span><span class="msg">'+a.msg+'</span><div class="drops">'+(a.drops||[]).map(renderDropTag).join('')+'</div></div>').join('')||'<p style="color:var(--muted)">まだアクティビティがありません</p>';
+  activityLog.innerHTML=(d.activity_log||[]).slice(0,10).map(a=>'<div class="activity-item"><span class="loop">#'+escapeHtml(String(a.loop))+'</span><span class="msg">'+escapeHtml(a.msg||'')+'</span><div class="drops">'+(a.drops||[]).map(renderDropTag).join('')+'</div></div>').join('')||'<p style="color:var(--muted)">まだアクティビティがありません</p>';
 }
 
+const SYNC_INTERVAL_MS=5000,TIMER_INTERVAL_MS=1000;
 async function syncState(){
-  try{const r=await fetch('/api/state');if(r.ok){const d=await r.json();setUIFromState(d);return true}}catch(e){}
+  try{const r=await fetch('/api/state');if(r.ok){const d=await r.json();setUIFromState(d);return true}else if(!navigator.onLine){return false}}
+  catch(e){if(navigator.onLine)st.textContent='同期失敗 - 再接続を試行中'}
   return false;
 }
 syncState();
-setInterval(syncState,3500);
+setInterval(syncState,SYNC_INTERVAL_MS);
 
 const es=new EventSource('/api/events');
 es.onopen=async()=>{if(!await syncState()){st.textContent='接続済み - 準備OK';st.className='status ready'}}
 es.onerror=()=>{st.textContent='再接続中...';st.className='status';syncState()}
 es.addEventListener('lucky_chance',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:true});sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})})
-es.addEventListener('exploration_started',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:true,lucky:false});sb.disabled=true;sp.removeAttribute('disabled');sp.disabled=false})
+es.addEventListener('exploration_started',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:true,lucky:false});sb.disabled=true;sp.disabled=false})
 es.addEventListener('exploration_stopped',e=>{goPending=false;const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:false});sb.disabled=false;sp.disabled=true})
 es.addEventListener('exploration_log',e=>{try{setUIFromState(JSON.parse(e.data||'{}'))}catch(_){}})
 
-sb.onclick=async()=>{if(sb.disabled)return;sb.disabled=true;goPending=true;clientStartMs=Date.now();sp.removeAttribute('disabled');sp.disabled=false;if(timerId)clearInterval(timerId);timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),1000);statTime.textContent=fmtElapsed(0);try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了 - 探索開始を待機中'}catch(e){sb.disabled=false;goPending=false;clientStartMs=null;if(timerId){clearInterval(timerId);timerId=null}}}
-sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});st.textContent='停止予約 - このループ終了後に停止します'}catch(e){}}
+sb.onclick=async()=>{if(sb.disabled)return;sb.disabled=true;goPending=true;clientStartMs=Date.now();sp.disabled=false;if(timerId)clearInterval(timerId);timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),TIMER_INTERVAL_MS);statTime.textContent=fmtElapsed(0);try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了 - 探索開始を待機中'}catch(e){sb.disabled=false;goPending=false;clientStartMs=null;if(timerId){clearInterval(timerId);timerId=null};st.textContent='接続エラー - サーバーを確認してください'}}
+sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});st.textContent='停止予約 - このループ終了後に停止します'}catch(e){st.textContent='接続エラー - 停止できませんでした'}}
 </script>
 </body>
 </html>

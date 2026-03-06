@@ -46,6 +46,13 @@ WAIT_AFTER_MONSTER_SCROLL = _PRESET["monster_scroll"]
 WAIT_AFTER_RETURN = _PRESET["return"]
 WAIT_HOVER_BEFORE_CLICK = (0.02, 0.08)
 
+# クリック・読み込み後の待機（秒）
+WAIT_AFTER_CLICK = float(os.environ.get("WAIT_AFTER_CLICK", 2.0))
+WAIT_AFTER_LOAD = (0.4, 0.8)  # (min, max) ページ読み込み後
+WAIT_AFTER_REFRESH = (1.0, 2.0)  # 更新ボタンクリック後
+WAIT_AFTER_CONFIRM_RANDOM = (0.2, 0.5)  # 確認クリック後のランダム追加（4%の確率）
+WAIT_CLICK_RETRY = float(os.environ.get("WAIT_CLICK_RETRY", 2.0))  # クリックリトライ間隔
+
 # タイムアウト
 TIMEOUT_MS = int(os.environ.get("TIMEOUT_MS", 30000))
 BUTTON_TIMEOUT_MS = int(os.environ.get("BUTTON_TIMEOUT_MS", 2000))

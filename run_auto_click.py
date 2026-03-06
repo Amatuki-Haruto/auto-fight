@@ -15,7 +15,8 @@ def main() -> None:
 
     while True:
         try:
-            code = subprocess.call([sys.executable, auto_click_path] + sys.argv[1:])
+            result = subprocess.run([sys.executable, auto_click_path] + sys.argv[1:])
+            code = result.returncode
             if not auto_restart:
                 sys.exit(code)
             if code == 0:

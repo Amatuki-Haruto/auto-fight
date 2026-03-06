@@ -83,10 +83,9 @@ async def _check_force_stop(page) -> Optional[str]:
     return _text_has_force_stop(text)
 
 
-async def _is_champion(page) -> bool:
+def _is_champion_text(text: str) -> bool:
     """〇〇階のチャンプです → 天空闘技場行けない"""
-    text = await _get_page_text(page)
-    return "チャンプです" in text
+    return "チャンプです" in (text or "")
 
 
 def _extract_exploration_result(text: str) -> tuple[str, int, list[str]]:
@@ -138,20 +137,28 @@ async def _find_button(page, selectors: list[str], timeout: int | None = None) -
     return None
 
 
-async def _click_and_verify(page, locator, expect_url_contains: str | list[str]) -> bool:
-    """クリック → 2秒待機 → 成功確認。失敗ならリトライ"""
+async def _click_and_verify(page, selectors: list[str], expect_url_contains: str | list[str]) -> bool:
+    """クリック → 待機 → 成功確認。失敗ならリトライ（リトライごとにボタンを再取得）"""
     expect = expect_url_contains
     if expect == "monster":
         expect = getattr(config, "URL_AFTER_EXPLORE", ["monster", "arena", "battle", "tower"])
     max_retries = getattr(config, "CLICK_RETRY_COUNT", 10)
+    wait_after = getattr(config, "WAIT_AFTER_CLICK", 2.0)
+    wait_retry = getattr(config, "WAIT_CLICK_RETRY", 2.0)
 
     for attempt in range(max_retries):
+        btn = await _find_button(page, selectors, timeout=3000)
+        if not btn:
+            _log(f"  → ボタンが見つかりません（試行{attempt+1}/{max_retries}）", level="warn")
+            await asyncio.sleep(wait_retry)
+            continue
         try:
-            await human_like_click(page, locator)
+            await human_like_click(page, btn)
         except PlaywrightTimeout:
-            _log(f"  → 要素が見つかりません（試行{attempt+1}/{max_retries}）。ホームへ戻ります。", level="warn")
-            return False
-        await asyncio.sleep(2.0)
+            _log(f"  → クリック中に要素が消えました（試行{attempt+1}/{max_retries}）", level="warn")
+            await asyncio.sleep(wait_retry)
+            continue
+        await asyncio.sleep(wait_after)
         try:
             url = page.url or ""
             if _url_matches_success(url, expect):
@@ -162,10 +169,11 @@ async def _click_and_verify(page, locator, expect_url_contains: str | list[str])
             url = page.url or ""
             if _url_matches_success(url, expect) or (isinstance(expect, list) and "games-alchemist.com" in url and "/home/" not in url):
                 return True
-        except Exception:
-            pass
-        _log(f"  → クリック未反映（試行{attempt+1}/{max_retries}）、2秒待機後にリトライ", level="warn")
-        await asyncio.sleep(2.0)
+        except Exception as e:
+            if config.VERBOSE:
+                _log(f"  → URL確認で例外: {e}", level="warn")
+        _log(f"  → クリック未反映（試行{attempt+1}/{max_retries}）、待機後にリトライ", level="warn")
+        await asyncio.sleep(wait_retry)
     return False
 
 
@@ -422,16 +430,20 @@ async def run_loop() -> None:
             _log("あるけみすと 自動ダンジョン探索")
             _log("=" * 50)
             try:
-                await http_client.get(f"{base}/api/check-go", timeout=2.0)
-            except Exception:
-                _log("※Web通知なしで動作。uvicorn app:app --port 8000 → http://localhost:8000")
+                r = await http_client.get(f"{base}/health", timeout=2.0)
+                if r.status_code == 200:
+                    _log("Webサーバーに接続済み。通知・操作が利用できます。")
+            except (httpx.ConnectError, httpx.TimeoutException):
+                _log("※Webサーバーに接続できません。uvicorn app:app --port 8000 で起動してください", level="warn")
             _log("-" * 50)
             _log("ログインするまで待機。ログイン後「自動探索開始」を押すか、初回のみ5秒で自動開始")
             _log("終了: Ctrl+C")
             _log("=" * 50)
 
             if "games-alchemist.com/home" not in page.url:
-                await _safe_goto_home(page)
+                if not await _safe_goto_home(page):
+                    _log("  → 初回のホーム遷移に失敗しました", level="warn")
+                    await _save_screenshot(page, "goto_home_fail")
 
             logged_in = False
             last_msg_at = 0.0
@@ -486,7 +498,10 @@ async def run_loop() -> None:
                         if await _click_refresh_button(page):
                             _log("  → 更新ボタンをクリック", level="success")
                             await page.wait_for_load_state("domcontentloaded")
-                            await asyncio.sleep(random.uniform(1.0, 2.0))
+                            wmin, wmax = getattr(config, "WAIT_AFTER_REFRESH", (1.0, 2.0))
+                            await asyncio.sleep(random.uniform(wmin, wmax))
+                        else:
+                            _log("  → 更新ボタンが見つかりません。そのまま続行", level="warn")
                         needs_refresh = False
 
                     _log("自動探索を開始します。", level="success")
@@ -501,20 +516,6 @@ async def run_loop() -> None:
                             break
                         if config.MAX_LOOPS and count >= config.MAX_LOOPS:
                             _log(f"最大ループ数 {config.MAX_LOOPS} に達しました。")
-                            needs_refresh = True
-                            break
-
-                        # 強制停止チェック（Lv100転生等）
-                        force_reason = await _check_force_stop(page)
-                        if force_reason:
-                            _log("")
-                            _log(f"★ {force_reason}", level="error")
-                            await _save_screenshot(page, "force_stop")
-                            await _api_post_with_retry(
-                                http_client,
-                                f"{base}/api/exploration-stopped",
-                                {"reason": force_reason},
-                            )
                             needs_refresh = True
                             break
 
@@ -554,9 +555,23 @@ async def run_loop() -> None:
                         wmin, wmax = config.WAIT_AFTER_HOME_SCROLL
                         await asyncio.sleep(random.uniform(wmin, wmax))
 
+                        page_text = await _get_page_text(page)
+                        force_reason = _text_has_force_stop(page_text)
+                        if force_reason:
+                            _log("")
+                            _log(f"★ {force_reason}", level="error")
+                            await _save_screenshot(page, "force_stop")
+                            await _api_post_with_retry(
+                                http_client,
+                                f"{base}/api/exploration-stopped",
+                                {"reason": force_reason},
+                            )
+                            needs_refresh = True
+                            break
+
                         if not getattr(config, "CHALLENGE_ARENA", True):
                             challenge_btn = None
-                        elif await _is_champion(page):
+                        elif _is_champion_text(page_text):
                             _log("  → チャンプのため天空闘技場はスキップ")
                             challenge_btn = None
                         else:
@@ -565,34 +580,40 @@ async def run_loop() -> None:
                         clicked = False
                         if challenge_btn:
                             _log("  → 挑戦する（天空闘技場）をクリック")
-                            clicked = await _click_and_verify(page, challenge_btn, "monster")
+                            clicked = await _click_and_verify(page, config.SELECTOR_CHALLENGE, "monster")
 
                         if not clicked:
                             explore_btn = await _find_button(page, config.SELECTOR_EXPLORE)
                             if explore_btn:
                                 _log("  → 探索するをクリック")
-                                clicked = await _click_and_verify(page, explore_btn, "monster")
+                                clicked = await _click_and_verify(page, config.SELECTOR_EXPLORE, "monster")
                             else:
                                 _log("  → 探索ボタンが見つかりません。ホームへ戻ります。", level="warn")
                                 consecutive_errors += 1
                                 await _save_screenshot(page, "no_explore")
                                 if consecutive_errors >= 5:
                                     _log("  ※連続エラーが多いため停止を検討してください", level="error")
-                                await _safe_goto_home(page)
+                                if not await _safe_goto_home(page):
+                                    _log("  → ホームへの遷移に失敗しました", level="warn")
+                                    await _save_screenshot(page, "goto_home_fail")
                                 continue
 
                         if not clicked:
                             _log("  → クリックが反映されませんでした。ホームへ戻ります。", level="warn")
                             await _save_screenshot(page, "click_fail")
-                            await _safe_goto_home(page)
+                            if not await _safe_goto_home(page):
+                                _log("  → ホームへの遷移に失敗しました", level="warn")
+                                await _save_screenshot(page, "goto_home_fail")
                             continue
 
                         consecutive_errors = 0
                         await page.wait_for_load_state("domcontentloaded")
-                        await asyncio.sleep(random.uniform(0.4, 0.8))
+                        wmin, wmax = getattr(config, "WAIT_AFTER_LOAD", (0.4, 0.8))
+                        await asyncio.sleep(random.uniform(wmin, wmax))
                         await _try_click_confirm(page)
                         if random.random() < 0.04:
-                            await asyncio.sleep(random.uniform(0.2, 0.5))
+                            rmin, rmax = getattr(config, "WAIT_AFTER_CONFIRM_RANDOM", (0.2, 0.5))
+                            await asyncio.sleep(random.uniform(rmin, rmax))
 
                         await _human_scroll_to_bottom(page)
                         wmin, wmax = config.WAIT_AFTER_MONSTER_SCROLL
@@ -639,18 +660,21 @@ async def run_loop() -> None:
                         if not return_btn:
                             _log("  → 街に戻るボタンが見つかりません。ホームへ戻ります。", level="warn")
                             await _save_screenshot(page, "no_return")
-                            await _safe_goto_home(page)
+                            if not await _safe_goto_home(page):
+                                _log("  → ホームへの遷移に失敗しました", level="warn")
+                                await _save_screenshot(page, "goto_home_fail")
                             continue
 
-                        try:
-                            await _click_and_verify(page, return_btn, "home")
-                        except PlaywrightTimeout:
-                            _log("  → 街に戻るクリックでタイムアウト。ホームへ戻ります。", level="warn")
-                            await _save_screenshot(page, "return_timeout")
-                            await _safe_goto_home(page)
+                        if not await _click_and_verify(page, config.SELECTOR_RETURN, "home"):
+                            _log("  → 街に戻るクリックが反映されませんでした。ホームへ戻ります。", level="warn")
+                            await _save_screenshot(page, "return_fail")
+                            if not await _safe_goto_home(page):
+                                _log("  → ホームへの遷移に失敗しました", level="warn")
+                                await _save_screenshot(page, "goto_home_fail")
                             continue
                         await page.wait_for_load_state("domcontentloaded")
-                        await asyncio.sleep(random.uniform(0.4, 0.8))
+                        wmin, wmax = getattr(config, "WAIT_AFTER_LOAD", (0.4, 0.8))
+                        await asyncio.sleep(random.uniform(wmin, wmax))
                         await _try_click_confirm(page)
 
                         # 街に戻った後のホーム画面でLv100転生をチェック
