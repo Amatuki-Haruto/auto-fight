@@ -155,6 +155,13 @@ SAFE_GOTO_HOME_RETRIES: int = max(1, _get_int("SAFE_GOTO_HOME_RETRIES", 3))
 # Webサーバー未接続時も探索のみ続行するか
 BACKEND_OPTIONAL: bool = _get_bool("BACKEND_OPTIONAL", True)
 
+# myshop 自動取得（環境変数 MYSHOP_AUTO_FETCH=1 で有効）
+MYSHOP_AUTO_FETCH: bool = _get_bool("MYSHOP_AUTO_FETCH", False)
+# 実行時刻の分（カンマ区切り）。例: "15,45" → 毎時 1:15, 1:45, 2:15, 2:45 ...
+MYSHOP_FETCH_MINUTES: list[int] = [
+    int(m.strip()) for m in os.environ.get("MYSHOP_FETCH_MINUTES", "15,45").split(",") if m.strip().isdigit()
+] or [15, 45]
+
 # CORS（カンマ区切り、* で全許可）
 _cors_raw: str = os.environ.get("CORS_ORIGINS", "*")
 CORS_ORIGINS: list[str] = ["*"] if _cors_raw.strip() == "*" else [o.strip() for o in _cors_raw.split(",") if o.strip()]
@@ -195,6 +202,8 @@ __all__ = [
     "URL_AFTER_EXPLORE",
     "USER_AGENT",
     "USER_DATA_DIR",
+    "MYSHOP_AUTO_FETCH",
+    "MYSHOP_FETCH_MINUTES",
     "VERBOSE",
     "VIEWPORT_OPTIONS",
     "WAIT_AFTER_CLICK",

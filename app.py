@@ -7,6 +7,7 @@ Render 等にデプロイ可能。軽量・高速。
 import asyncio
 import json
 import logging
+import sys
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -94,9 +95,61 @@ async def broadcast(event: str, data: dict) -> None:
                 _logger.debug("SSE broadcast: QueueFull for client, skipping")
 
 
+_myshop_scheduler_task: asyncio.Task | None = None
+
+
+def _seconds_until_next_fetch() -> float:
+    """次の実行時刻（:15 or :45）までの秒数を返す"""
+    from datetime import timedelta
+    now = datetime.now()
+    minutes = sorted(set(config.MYSHOP_FETCH_MINUTES))
+    for m in minutes:
+        if now.minute < m:
+            target = now.replace(minute=m, second=0, microsecond=0)
+            return (target - now).total_seconds()
+    next_hour = now.replace(minute=minutes[0], second=0, microsecond=0) + timedelta(hours=1)
+    return (next_hour - now).total_seconds()
+
+
+async def _myshop_scheduler_loop() -> None:
+    """毎時 :15, :45 に myshop 価格を自動取得"""
+    fetcher_path = Path(__file__).parent / "myshop_fetcher.py"
+    if not fetcher_path.exists():
+        _logger.warning("myshop_fetcher.py が見つかりません。自動取得をスキップします")
+        return
+    while True:
+        wait_sec = _seconds_until_next_fetch()
+        _logger.info("市場価格の次回取得: %s から約 %.0f 秒後", datetime.now().strftime("%H:%M"), wait_sec)
+        await asyncio.sleep(wait_sec)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(fetcher_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(Path(__file__).parent),
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0 and stderr:
+                _logger.warning("市場価格取得: %s", stderr.decode("utf-8", errors="replace").strip())
+            elif proc.returncode == 0:
+                _logger.info("市場価格を自動取得しました")
+        except Exception as e:
+            _logger.warning("市場価格取得エラー: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _myshop_scheduler_task
+    if config.MYSHOP_AUTO_FETCH:
+        _myshop_scheduler_task = asyncio.create_task(_myshop_scheduler_loop())
+        _logger.info("市場価格の自動取得を有効にしました（%s 毎時）", config.MYSHOP_FETCH_MINUTES)
     yield
+    if _myshop_scheduler_task and not _myshop_scheduler_task.done():
+        _myshop_scheduler_task.cancel()
+        try:
+            await _myshop_scheduler_task
+        except asyncio.CancelledError:
+            pass
     sse_clients.clear()
 
 
@@ -143,6 +196,15 @@ async def health() -> dict:
 @app.get("/", response_class=HTMLResponse, tags=["静的"])
 async def index() -> HTMLResponse:
     return HTMLResponse(content=_load_index_html())
+
+
+@app.get("/myshop", response_class=HTMLResponse, tags=["静的"])
+async def myshop_page() -> HTMLResponse:
+    """市場価格推移ページ"""
+    html_path = STATIC_DIR / "myshop.html"
+    if html_path.exists():
+        return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<p>myshop.html が見つかりません</p>")
 
 
 # -----------------------------------------------------------------------------
@@ -285,6 +347,81 @@ async def api_exploration_stopped(body: StopReasonBody = Body(default=StopReason
         state_stop_reason = body.reason or ""
     await broadcast("exploration_stopped", _get_full_state())
     return {"ok": True}
+
+
+# -----------------------------------------------------------------------------
+# API - myshop 価格記録
+# -----------------------------------------------------------------------------
+
+try:
+    from myshop_parser import parse_myshop_html
+    from myshop_db import get_price_summary, get_snapshots, init_db, insert_prices
+    _myshop_available = True
+except ImportError:
+    _myshop_available = False
+
+
+@app.get("/api/myshop/summary", tags=["myshop"], summary="価格サマリ取得")
+async def api_myshop_summary(category: str | None = None, days: int = 30) -> dict:
+    """アイテム別の価格サマリ（min/max/avg）"""
+    if not _myshop_available:
+        return {"error": "myshop module not available", "items": []}
+    init_db()
+    items = get_price_summary(category=category, limit_days=days)
+    return {"items": items, "days": days}
+
+
+@app.get("/api/myshop/snapshots", tags=["myshop"], summary="記録済みスナップショット一覧")
+async def api_myshop_snapshots() -> dict:
+    if not _myshop_available:
+        return {"snapshots": []}
+    init_db()
+    return {"snapshots": get_snapshots()}
+
+
+@app.post("/api/myshop/import", tags=["myshop"], summary="HTMLから価格を取り込み")
+async def api_myshop_import(html: str = Body(..., embed=True)) -> dict:
+    """保存したHTMLの本文を送信して価格を記録"""
+    if not _myshop_available:
+        return {"error": "myshop module not available", "count": 0}
+    init_db()
+    items = parse_myshop_html(html)
+    if items:
+        count = insert_prices(items)
+        return {"ok": True, "count": count, "items": items}
+    return {"ok": True, "count": 0, "items": [], "message": "No items found in HTML"}
+
+
+@app.post("/api/myshop/fetch-now", tags=["myshop"], summary="今すぐ市場価格を自動取得")
+async def api_myshop_fetch_now() -> dict:
+    """Playwright で市場ページを取得してDBに保存（手動トリガー）"""
+    fetcher_path = Path(__file__).parent / "myshop_fetcher.py"
+    if not fetcher_path.exists():
+        return {"error": "myshop_fetcher.py not found", "count": 0}
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, str(fetcher_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(Path(__file__).parent),
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = (stderr or stdout or b"").decode("utf-8", errors="replace").strip()
+            return {"error": err or "fetch failed", "count": 0}
+        # 標準出力から件数を推測（"市場価格を N 件記録"）
+        out = (stdout or b"").decode("utf-8")
+        import re
+        m = re.search(r"(\d+)\s*件記録", out)
+        count = int(m.group(1)) if m else 0
+        return {"ok": True, "count": count}
+    except Exception as e:
+        return {"error": str(e), "count": 0}
+
+
+# -----------------------------------------------------------------------------
+# API - SSE
+# -----------------------------------------------------------------------------
 
 
 @app.get("/api/events", tags=["SSE"], summary="SSE イベントストリーム")
