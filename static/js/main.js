@@ -5,7 +5,6 @@
 const SYNC_INTERVAL_MS = 5000;
 const TIMER_INTERVAL_MS = 1000;
 const MAX_DISPLAY_DROPS = 80;
-const CHART_HISTORY_LEN = 30;
 const RANK_ORDER = ["S", "A", "B", "C", "D", "E", "F", "?"];
 
 const $ = (e) => document.querySelector(e);
@@ -18,8 +17,6 @@ const tb = $("#themeBtn");
 const statLevel = $("#statLevel");
 const statLoop = $("#statLoop");
 const statTime = $("#statTime");
-const statExp = $("#statExp");
-const statExpPerLoop = $("#statExpPerLoop");
 const statDrops = $("#statDrops");
 const lastMsg = $("#lastMessage");
 const lastMsgText = $("#lastMsgText");
@@ -30,7 +27,6 @@ const dropFilter = $("#dropFilter");
 const dropsList = $("#dropsList");
 const sortDropsBtn = $("#sortDropsBtn");
 const activityLog = $("#activityLog");
-const expChart = $("#expChart");
 const statsSummary = $("#statsSummary");
 const stopReasonEl = $("#stopReason");
 const off = $("#offlineMsg");
@@ -40,7 +36,6 @@ let timerId = null;
 let goPending = false;
 let dropsSortOrder = "default";
 let lastState = {};
-let expHistory = [];
 let prevLoopCount = 0;
 
 // --- テーマ ---
@@ -141,40 +136,14 @@ function updateLoopWithAnimation(count) {
   statLoop.textContent = n;
 }
 
-// --- 経験値グラフ ---
-function updateExpChart(history) {
-  if (!expChart) return;
-  const arr = Array.isArray(history) ? history : [];
-  const recent = arr.slice(-CHART_HISTORY_LEN);
-  const max = Math.max(1, ...recent);
-  expChart.innerHTML = recent
-    .map(
-      (v) =>
-        '<div class="chart-bar" style="height:' +
-        (max > 0 ? (v / max) * 100 : 0) +
-        '%" title="' +
-        escapeHtml(String(v)) +
-        '"></div>'
-    )
-    .join("");
-}
-
 // --- 統計サマリ ---
 function updateStatsSummary(d) {
   if (!statsSummary) return;
   const loop = d.loop_count || 0;
-  const total = d.total_exp || 0;
-  const avg = loop > 0 ? Math.floor(total / loop) : 0;
   const drops = (d.drops || []).length;
   statsSummary.innerHTML =
     "<p>総周回: <strong>" +
     escapeHtml(String(loop)) +
-    "</strong></p>" +
-    "<p>総EXP: <strong>" +
-    escapeHtml(String(total)) +
-    "</strong></p>" +
-    "<p>平均EXP/周: <strong>" +
-    escapeHtml(String(avg)) +
     "</strong></p>" +
     "<p>総ドロップ数: <strong>" +
     escapeHtml(String(drops)) +
@@ -225,16 +194,7 @@ function setUIFromState(d) {
   }
 
   updateLoopWithAnimation(d.loop_count || 0);
-  if (statExp) statExp.textContent = (d.total_exp || 0).toLocaleString();
   if (statDrops) statDrops.textContent = (d.drops || []).length;
-
-  // 1周あたり経験値
-  const loopCount = d.loop_count || 0;
-  const totalExp = d.total_exp || 0;
-  if (statExpPerLoop) {
-    statExpPerLoop.textContent =
-      loopCount > 0 ? Math.floor(totalExp / loopCount).toLocaleString() : "-";
-  }
 
   if (!run && !goPending) {
     clientStartMs = null;
@@ -334,19 +294,6 @@ function setUIFromState(d) {
       '<p style="color:var(--muted)">まだアクティビティがありません</p>';
   }
 
-  // 経験値履歴（activity_log から抽出）
-  const log = d.activity_log || [];
-  const newHistory = log
-    .filter((a) => a.exp != null && a.exp > 0)
-    .map((a) => a.exp)
-    .reverse();
-  if (newHistory.length > 0) {
-    expHistory = newHistory;
-  } else if (log.length > 0 && totalExp > 0 && loopCount > 0) {
-    const perLoop = Math.floor(totalExp / loopCount);
-    expHistory = Array(loopCount).fill(perLoop).slice(-CHART_HISTORY_LEN);
-  }
-  updateExpChart(expHistory);
   updateStatsSummary(d);
 }
 
