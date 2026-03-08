@@ -670,12 +670,6 @@ async def _handle_exploring(ctx: ExplorationContext) -> tuple[State, Exploration
             f.write(str(ctx.count))
     except Exception:
         pass
-    if ctx.backend_connected:
-        payload: dict = {"loop_count": ctx.count, "stats": {"consecutive_errors": ctx.consecutive_errors}}
-        level = _extract_level(page_text)
-        if level is not None:
-            payload["level"] = level
-        await _api_post_with_retry(client, f"{base}/api/exploration-log", payload)
     _log(f"[{ctx.count}] ループ開始 (経過: {ctx._loop_start - ctx.start_time:.0f}秒)")
     wmin, wmax = config.WAIT_START
     await asyncio.sleep(random.uniform(wmin, wmax))
@@ -683,6 +677,12 @@ async def _handle_exploring(ctx: ExplorationContext) -> tuple[State, Exploration
     wmin, wmax = config.WAIT_AFTER_HOME_SCROLL
     await asyncio.sleep(random.uniform(wmin, wmax))
     page_text = await _get_page_text(page)
+    if ctx.backend_connected:
+        payload: dict = {"loop_count": ctx.count, "stats": {"consecutive_errors": ctx.consecutive_errors}}
+        level = _extract_level(page_text)
+        if level is not None:
+            payload["level"] = level
+        await _api_post_with_retry(client, f"{base}/api/exploration-log", payload)
     force_reason = _text_has_force_stop(page_text)
     if force_reason:
         _log("")

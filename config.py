@@ -59,7 +59,7 @@ BRAVE_PATH: str = os.environ.get(
 
 # 待機時間（秒）- プリセット: fast, normal, slow（1周あたり約20〜23秒を想定）
 _WAIT_PRESET: dict[str, dict[str, tuple[float, float]]] = {
-    "fast": {"start": (0.1, 0.3), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (2.0, 5.0)},
+    "fast": {"start": (0.1, 0.3), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (0.5, 1.5)},
     "normal": {"start": (0.15, 0.4), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (2.5, 5.5)},
     "slow": {"start": (0.2, 0.5), "home_scroll": (0.15, 0.4), "monster_scroll": (0.15, 0.4), "return": (3.0, 6.0)},
 }

@@ -3,22 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0d1117">
+  <meta name="description" content="あるけみすと 自動探索 - Web通知・操作パネル">
   <title>あるけみすと 自動探索</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" type="image/png" href="/static/logo.png">
+  <link rel="manifest" href="/static/manifest.json">
 </head>
 <body>
   <div class="app-wrap">
     <header class="header">
-      <h1><span class="icon">⚔️</span> あるけみすと 自動探索</h1>
-      <button class="theme-btn" id="themeBtn" title="テーマ切替 (T)" aria-label="テーマ切替">🌙</button>
+      <div class="header-brand">
+        <img class="logo" src="/static/logo.png" alt="" width="48" height="48">
+        <div>
+          <h1>あるけみすと 自動探索</h1>
+          <p class="subtitle">Web通知・操作パネル</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" id="helpBtn" title="ショートカット (?)" aria-label="ヘルプ">?</button>
+        <button class="theme-btn" id="themeBtn" title="テーマ切替 (T)" aria-label="テーマ切替">🌙</button>
+      </div>
     </header>
 
     <div class="status-bar" id="statusBar">
-      <div class="status" id="status" role="status" aria-live="polite" aria-busy="true">接続中...</div>
+      <div class="status" id="status" role="status" aria-live="polite" aria-busy="true">
+        <span class="status-dot"></span>
+        <span class="status-text">接続中...</span>
+      </div>
       <div id="stopReason" class="stop-reason-box" style="display:none" role="alert"></div>
       <div id="offlineMsg" class="offline" style="display:none" role="alert">
         オフラインです。ネットワーク回復後に自動で再接続します。
       </div>
+      <div id="reconnectToast" class="toast" style="display:none" role="status">再接続しました</div>
     </div>
 
     <nav class="tabs" role="tablist">
@@ -29,23 +49,29 @@
     </nav>
 
     <main class="main">
+      <!-- ローディング -->
+      <div id="loadingOverlay" class="loading-overlay" style="display:none">
+        <div class="spinner"></div>
+        <p>接続中...</p>
+      </div>
+
       <!-- タブ: 状況 -->
       <section id="tab-dashboard" class="tab-panel active" role="tabpanel">
         <div class="stats-grid">
-          <div class="stat">
-            <div class="val" id="statLevel">-</div>
+          <div class="stat card-glow">
+            <div class="val stat-num" id="statLevel">-</div>
             <div class="label">レベル</div>
           </div>
-          <div class="stat">
-            <div class="val count-up" id="statLoop">0</div>
+          <div class="stat card-glow">
+            <div class="val stat-num count-up" id="statLoop">0</div>
             <div class="label">周回数</div>
           </div>
-          <div class="stat">
-            <div class="val" id="statTime">--:--</div>
+          <div class="stat card-glow">
+            <div class="val stat-num" id="statTime">--:--</div>
             <div class="label">経過時間</div>
           </div>
-          <div class="stat">
-            <div class="val" id="statDrops">0</div>
+          <div class="stat card-glow">
+            <div class="val stat-num" id="statDrops">0</div>
             <div class="label">ドロップ数</div>
           </div>
         </div>
@@ -54,20 +80,24 @@
           <button type="button" class="btn btn-stop" id="stopBtn" disabled aria-label="停止 (Esc)">■ 停止</button>
           <a href="https://games-alchemist.com/home/" target="_blank" rel="noopener" class="btn btn-link">🎮 ゲームを開く</a>
         </div>
-        <div class="last-result card">
+        <div class="last-result card card-glow">
           <h2>📋 直近の結果</h2>
-          <div id="lastMessage" class="activity-item" style="display:none">
+          <div id="lastMessage" class="activity-item activity-item-featured" style="display:none">
             <span class="loop" id="loopCount"></span>
             <span class="msg" id="lastMsgText"></span>
             <div class="drops" id="lastMsgDrops"></div>
           </div>
-          <p id="noResult" class="muted">まだ探索結果がありません</p>
+          <div id="noResult" class="empty-state">
+            <span class="empty-icon">📭</span>
+            <p>まだ探索結果がありません</p>
+            <p class="empty-hint">「自動探索開始」を押すと探索が始まります</p>
+          </div>
         </div>
       </section>
 
       <!-- タブ: ドロップ -->
       <section id="tab-drops" class="tab-panel" role="tabpanel">
-        <div class="drop-controls">
+        <div class="drop-controls card card-glow">
           <div class="drop-ranks" id="dropRanks"><span class="C">まだなし</span></div>
           <div class="filter-row">
             <span class="filter-label">フィルタ:</span>
@@ -81,30 +111,84 @@
               <option value="E">Eのみ</option>
               <option value="F">Fのみ</option>
             </select>
-            <button type="button" class="sort-btn" id="sortDropsBtn">並び替え</button>
+            <button type="button" class="sort-btn" id="sortDropsBtn">
+              <span id="sortDropsLabel">並び替え: デフォルト</span>
+            </button>
           </div>
         </div>
-        <div class="drops-list" id="dropsList"></div>
+        <div class="drops-list-wrap card card-glow">
+          <div class="drops-list" id="dropsList"></div>
+          <div id="dropsEmpty" class="empty-state" style="display:none">
+            <span class="empty-icon">🏆</span>
+            <p>このランクのドロップはありません</p>
+          </div>
+        </div>
       </section>
 
       <!-- タブ: アクティビティ -->
       <section id="tab-activity" class="tab-panel" role="tabpanel">
-        <h2>📜 アクティビティログ</h2>
-        <div class="activity" id="activityLog"></div>
+        <div class="activity-header">
+          <h2>📜 アクティビティログ</h2>
+          <label class="toggle-label">
+            <input type="checkbox" id="autoScrollToggle" checked>
+            <span>自動スクロール</span>
+          </label>
+        </div>
+        <div class="activity-scroll card card-glow" id="activityScroll">
+          <div class="activity" id="activityLog"></div>
+          <div id="activityEmpty" class="empty-state" style="display:none">
+            <span class="empty-icon">📜</span>
+            <p>まだアクティビティがありません</p>
+          </div>
+        </div>
       </section>
 
       <!-- タブ: 統計 -->
       <section id="tab-stats" class="tab-panel" role="tabpanel">
-        <div class="stats-summary" id="statsSummary"></div>
-        <details class="steps">
+        <div class="stats-cards">
+          <div class="stat-card card card-glow">
+            <div class="stat-card-val" id="statsLoop">0</div>
+            <div class="stat-card-label">総周回</div>
+          </div>
+          <div class="stat-card card card-glow">
+            <div class="stat-card-val" id="statsDrops">0</div>
+            <div class="stat-card-label">総ドロップ数</div>
+          </div>
+        </div>
+        <details class="steps card card-glow">
           <summary>🚀 起動手順</summary>
-          <p>1. <code>python3 auto_click.py</code> を実行<br>
-          2. Braveでゲームにログイン<br>
-          3. 「自動探索開始」を押す（または Enter キー）</p>
-          <p class="kbd-hint">💡 Enter: 開始 / Esc: 停止</p>
+          <ol class="steps-list">
+            <li><code>python3 auto_click.py</code> を実行</li>
+            <li>Braveでゲームにログイン</li>
+            <li>「自動探索開始」を押す（または Enter キー）</li>
+          </ol>
+          <p class="kbd-hint">💡 Enter: 開始 / Esc: 停止 / T: テーマ切替 / ?: ヘルプ</p>
         </details>
       </section>
     </main>
+
+    <footer class="footer">
+      <span id="lastSync" class="last-sync">--</span>
+    </footer>
+  </div>
+
+  <!-- ヘルプモーダル -->
+  <div id="helpModal" class="modal" role="dialog" aria-labelledby="helpTitle" aria-modal="true" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-content card">
+      <h2 id="helpTitle">キーボードショートカット</h2>
+      <dl class="shortcut-list">
+        <dt><kbd>Enter</kbd></dt><dd>自動探索開始</dd>
+        <dt><kbd>Esc</kbd></dt><dd>停止</dd>
+        <dt><kbd>T</kbd></dt><dd>テーマ切替</dd>
+        <dt><kbd>?</kbd></dt><dd>このヘルプを表示</dd>
+      </dl>
+      <label class="toggle-label modal-opt">
+        <input type="checkbox" id="luckySoundToggle" checked>
+        <span>ラッキーチャンス時にサウンド再生</span>
+      </label>
+      <button type="button" class="btn btn-link modal-close" id="helpClose">閉じる</button>
+    </div>
   </div>
 
   <script src="/static/js/main.js" defer></script>

@@ -1,0 +1,17 @@
+{
+  "name": "あるけみすと 自動探索",
+  "short_name": "自動探索",
+  "description": "Web通知・操作パネル",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    {
+      "src": "/static/logo.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

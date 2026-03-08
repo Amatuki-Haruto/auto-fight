@@ -11,9 +11,15 @@ const $ = (e) => document.querySelector(e);
 const $$ = (e) => document.querySelectorAll(e);
 
 const st = $("#status");
+const statusText = st?.querySelector(".status-text");
 const sb = $("#startBtn");
 const sp = $("#stopBtn");
 const tb = $("#themeBtn");
+const helpBtn = $("#helpBtn");
+const helpModal = $("#helpModal");
+const helpClose = $("#helpClose");
+const loadingOverlay = $("#loadingOverlay");
+const reconnectToast = $("#reconnectToast");
 const statLevel = $("#statLevel");
 const statLoop = $("#statLoop");
 const statTime = $("#statTime");
@@ -25,9 +31,16 @@ const noResult = $("#noResult");
 const dropRanks = $("#dropRanks");
 const dropFilter = $("#dropFilter");
 const dropsList = $("#dropsList");
+const dropsEmpty = $("#dropsEmpty");
 const sortDropsBtn = $("#sortDropsBtn");
+const sortDropsLabel = $("#sortDropsLabel");
 const activityLog = $("#activityLog");
-const statsSummary = $("#statsSummary");
+const activityEmpty = $("#activityEmpty");
+const activityScroll = $("#activityScroll");
+const autoScrollToggle = $("#autoScrollToggle");
+const statsLoop = $("#statsLoop");
+const statsDrops = $("#statsDrops");
+const lastSyncEl = $("#lastSync");
 const stopReasonEl = $("#stopReason");
 const off = $("#offlineMsg");
 
@@ -37,6 +50,32 @@ let goPending = false;
 let dropsSortOrder = "default";
 let lastState = {};
 let prevLoopCount = 0;
+let lastSyncAt = null;
+let wasOffline = false;
+let luckySoundEnabled = localStorage.luckySound !== "0";
+
+// ラッキーチャンス用ビープ音（Web Audio API）
+function playLuckySound() {
+  if (!luckySoundEnabled) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (_) {}
+}
+
+function setStatusText(s) {
+  if (statusText) statusText.textContent = s;
+  else if (st) st.textContent = s;
+}
 
 // --- テーマ ---
 function initTheme() {
@@ -44,7 +83,7 @@ function initTheme() {
   const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
   if (saved === "light" || (!saved && prefersLight)) {
     document.documentElement.setAttribute("data-theme", "light");
-    tb.textContent = "☀️";
+    if (tb) tb.textContent = "☀️";
   }
 }
 
@@ -52,13 +91,25 @@ function toggleTheme() {
   const d = document.documentElement;
   if (d.dataset.theme) {
     d.removeAttribute("data-theme");
-    tb.textContent = "🌙";
+    if (tb) tb.textContent = "🌙";
     localStorage.theme = "";
   } else {
     d.dataset.theme = "light";
-    tb.textContent = "☀️";
+    if (tb) tb.textContent = "☀️";
     localStorage.theme = "light";
   }
+}
+
+// --- ヘルプモーダル ---
+function openHelp() {
+  if (helpModal) {
+    helpModal.hidden = false;
+    helpClose?.focus();
+  }
+}
+
+function closeHelp() {
+  if (helpModal) helpModal.hidden = true;
 }
 
 // --- タブ ---
@@ -89,6 +140,16 @@ function fmtElapsed(ms) {
   const h = Math.floor(m / 60);
   if (h > 0) return h + "時間" + String(m % 60).padStart(2, "0") + "分";
   return String(m).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+
+function fmtLastSync(iso) {
+  if (!iso) return "--";
+  const d = new Date(iso);
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60) return "たった今";
+  if (sec < 3600) return Math.floor(sec / 60) + "分前";
+  if (sec < 86400) return Math.floor(sec / 3600) + "時間前";
+  return d.toLocaleDateString();
 }
 
 function escapeHtml(s) {
@@ -124,6 +185,12 @@ function filterDropsByRank(drops, rank) {
   return drops.filter((d) => rankClass(d) === rank);
 }
 
+function getSortLabel() {
+  if (dropsSortOrder === "default") return "並び替え: デフォルト";
+  if (dropsSortOrder === "rank-desc") return "並び替え: ランク▼";
+  return "並び替え: ランク▲";
+}
+
 // --- 周回数アニメーション ---
 function updateLoopWithAnimation(count) {
   if (!statLoop) return;
@@ -136,55 +203,57 @@ function updateLoopWithAnimation(count) {
   statLoop.textContent = n;
 }
 
-// --- 統計サマリ ---
-function updateStatsSummary(d) {
-  if (!statsSummary) return;
-  const loop = d.loop_count || 0;
-  const drops = (d.drops || []).length;
-  statsSummary.innerHTML =
-    "<p>総周回: <strong>" +
-    escapeHtml(String(loop)) +
-    "</strong></p>" +
-    "<p>総ドロップ数: <strong>" +
-    escapeHtml(String(drops)) +
-    "</strong></p>";
+// --- ローディング・トースト ---
+function hideLoading() {
+  if (loadingOverlay) loadingOverlay.style.display = "none";
+}
+
+function showReconnectToast() {
+  if (!reconnectToast) return;
+  reconnectToast.style.display = "block";
+  setTimeout(() => {
+    reconnectToast.style.display = "none";
+  }, 2500);
 }
 
 // --- UI 更新 ---
 function setUIFromState(d) {
   lastState = d;
+  lastSyncAt = d.at || new Date().toISOString();
   const run = d.running;
   const lucky = d.lucky;
-  st.setAttribute("aria-busy", run || lucky ? "true" : "false");
+  if (st) st.setAttribute("aria-busy", run || lucky ? "true" : "false");
 
   if (d.stop_reason) {
-    stopReasonEl.style.display = "block";
-    stopReasonEl.textContent = "⚠ " + escapeHtml(d.stop_reason);
-    stopReasonEl.style.color = "var(--danger)";
+    if (stopReasonEl) {
+      stopReasonEl.style.display = "block";
+      stopReasonEl.textContent = "⚠ " + escapeHtml(d.stop_reason);
+      stopReasonEl.style.color = "var(--danger)";
+    }
   } else {
-    stopReasonEl.style.display = "none";
+    if (stopReasonEl) stopReasonEl.style.display = "none";
   }
 
   const waitSec = d.lucky_chance_wait_sec || 20;
   if (lucky) {
-    st.textContent =
-      "★ 一時停止（ラッキーチャンス） 「再開」で" + waitSec + "秒後に開始";
-    st.className = "status lucky";
-    sb.disabled = false;
-    sb.textContent = "▶ 再開";
-    sp.disabled = false;
+    setStatusText("★ 一時停止（ラッキーチャンス） 「再開」で" + waitSec + "秒後に開始");
+    st?.classList.remove("ready", "running");
+    st?.classList.add("lucky");
+    if (sb) { sb.disabled = false; sb.textContent = "▶ 再開"; }
+    if (sp) sp.disabled = false;
+    playLuckySound();
   } else if (run) {
-    st.textContent = "探索実行中";
-    st.className = "status running";
-    sb.disabled = true;
-    sb.textContent = "▶ 自動探索開始";
-    sp.disabled = false;
+    setStatusText("探索実行中");
+    st?.classList.remove("ready", "lucky");
+    st?.classList.add("running");
+    if (sb) { sb.disabled = true; sb.textContent = "▶ 自動探索開始"; }
+    if (sp) sp.disabled = false;
   } else {
-    st.textContent = "停止済み - 「開始」で再開";
-    st.className = "status ready";
-    sb.disabled = false;
-    sp.disabled = true;
-    sp.setAttribute("disabled", "");
+    setStatusText("停止済み - 「開始」で再開");
+    st?.classList.remove("running", "lucky");
+    st?.classList.add("ready");
+    if (sb) sb.disabled = false;
+    if (sp) { sp.disabled = true; sp.setAttribute("disabled", ""); }
   }
 
   const level = d.level != null ? d.level : 0;
@@ -198,10 +267,7 @@ function setUIFromState(d) {
 
   if (!run && !goPending) {
     clientStartMs = null;
-    if (timerId) {
-      clearInterval(timerId);
-      timerId = null;
-    }
+    if (timerId) { clearInterval(timerId); timerId = null; }
   } else if (run) {
     goPending = false;
     if (clientStartMs == null && d.session_started_at) {
@@ -215,86 +281,85 @@ function setUIFromState(d) {
     }, TIMER_INTERVAL_MS);
   }
   if (statTime) {
-    statTime.textContent = fmtElapsed(
-      clientStartMs != null ? Date.now() - clientStartMs : null
-    );
+    statTime.textContent = fmtElapsed(clientStartMs != null ? Date.now() - clientStartMs : null);
   }
 
-  // ドロップランク集計（sort ボタンはもう HTML にあるので追加しない）
+  // ドロップランク集計
   const byRank = d.drops_by_rank || {};
   const rankKeys = Object.keys(byRank).sort(
     (a, b) => RANK_ORDER.indexOf(a) - RANK_ORDER.indexOf(b)
   );
   if (dropRanks) {
-    dropRanks.innerHTML =
-      rankKeys.length
-        ? rankKeys
-            .map(
-              (r) =>
-                '<span class="' +
-                escapeHtml(r) +
-                '">' +
-                escapeHtml(r) +
-                ": " +
-                byRank[r] +
-                "</span>"
-            )
-            .join("")
-        : '<span class="C">まだなし</span>';
+    dropRanks.innerHTML = rankKeys.length
+      ? rankKeys.map((r) => '<span class="' + escapeHtml(r) + '">' + escapeHtml(r) + ": " + byRank[r] + "</span>").join("")
+      : '<span class="C">まだなし</span>';
   }
 
-  // ドロップリスト（フィルタ・ソート適用）
+  // ドロップリスト
   const rawDrops = d.drops || [];
   const filterRank = dropFilter ? dropFilter.value : "";
   const filtered = filterDropsByRank(rawDrops, filterRank);
   const sortedDrops = sortDropsByRank(filtered, dropsSortOrder);
   if (dropsList) {
-    dropsList.innerHTML =
-      sortedDrops.slice(-MAX_DISPLAY_DROPS).map(renderDropTag).join("") || "";
+    const html = sortedDrops.slice(-MAX_DISPLAY_DROPS).map(renderDropTag).join("");
+    dropsList.innerHTML = html;
+    dropsList.style.display = html ? "flex" : "none";
   }
+  if (dropsEmpty) {
+    dropsEmpty.style.display = sortedDrops.length === 0 ? "block" : "none";
+  }
+
+  if (sortDropsLabel) sortDropsLabel.textContent = getSortLabel();
 
   // 直近結果
   const acts = d.activity_log || [];
   const lastAct = acts[0];
   if (d.last_message && lastAct) {
-    noResult.style.display = "none";
-    lastMsg.style.display = "flex";
+    if (noResult) noResult.style.display = "none";
+    if (lastMsg) lastMsg.style.display = "flex";
     const loopEl = $("#loopCount");
     if (loopEl) loopEl.textContent = "#" + lastAct.loop + "周目";
-    lastMsgText.textContent = d.last_message;
-    lastMsgDrops.innerHTML = (lastAct.drops || []).map(renderDropTag).join("");
+    if (lastMsgText) lastMsgText.textContent = d.last_message;
+    if (lastMsgDrops) lastMsgDrops.innerHTML = (lastAct.drops || []).map(renderDropTag).join("");
   } else if (d.last_message) {
-    noResult.style.display = "none";
-    lastMsg.style.display = "flex";
+    if (noResult) noResult.style.display = "none";
+    if (lastMsg) lastMsg.style.display = "flex";
     const loopEl = $("#loopCount");
     if (loopEl) loopEl.textContent = "";
-    lastMsgText.textContent = d.last_message;
-    lastMsgDrops.innerHTML = "";
+    if (lastMsgText) lastMsgText.textContent = d.last_message;
+    if (lastMsgDrops) lastMsgDrops.innerHTML = "";
   } else {
-    noResult.style.display = "block";
-    lastMsg.style.display = "none";
+    if (noResult) noResult.style.display = "block";
+    if (lastMsg) lastMsg.style.display = "none";
   }
 
   // アクティビティログ
+  const log = d.activity_log || [];
   if (activityLog) {
-    activityLog.innerHTML =
-      (d.activity_log || [])
-        .slice(0, 15)
-        .map(
-          (a) =>
-            '<div class="activity-item"><span class="loop">#' +
-            escapeHtml(String(a.loop)) +
-            "周目</span><span class=\"msg\">" +
-            escapeHtml(a.msg || "") +
-            '</span><div class="drops">' +
-            (a.drops || []).map(renderDropTag).join("") +
-            "</div></div>"
-        )
-        .join("") ||
-      '<p style="color:var(--muted)">まだアクティビティがありません</p>';
+    const html = log.slice(0, 15).map((a) =>
+      '<div class="activity-item"><span class="loop">#' + escapeHtml(String(a.loop)) +
+      "周目</span><span class=\"msg\">" + escapeHtml(a.msg || "") +
+      '</span><div class="drops">' + (a.drops || []).map(renderDropTag).join("") + "</div></div>"
+    ).join("");
+    activityLog.innerHTML = html;
+    activityLog.style.display = html ? "block" : "none";
+    const shouldScroll = autoScrollToggle?.checked && html;
+    if (activityScroll && shouldScroll) {
+      requestAnimationFrame(() => {
+        activityScroll.scrollTop = activityScroll.scrollHeight;
+      });
+    }
+  }
+  if (activityEmpty) {
+    activityEmpty.style.display = log.length === 0 ? "block" : "none";
   }
 
-  updateStatsSummary(d);
+  // 統計タブ
+  if (statsLoop) statsLoop.textContent = (d.loop_count || 0).toLocaleString();
+  if (statsDrops) statsDrops.textContent = (d.drops || []).length.toLocaleString();
+
+  // 最終同期
+  if (lastSyncEl) lastSyncEl.textContent = "最終更新: " + fmtLastSync(lastSyncAt);
 }
 
 async function syncState() {
@@ -303,15 +368,20 @@ async function syncState() {
     if (r.ok) {
       const d = await r.json();
       setUIFromState(d);
+      hideLoading();
+      if (wasOffline) {
+        showReconnectToast();
+        wasOffline = false;
+      }
       return true;
     }
     if (!navigator.onLine) return false;
-    st.textContent = "同期失敗 (" + r.status + ") - 再接続を試行中";
-    st.setAttribute("aria-busy", "false");
+    setStatusText("同期失敗 (" + r.status + ") - 再接続を試行中");
+    if (st) st.setAttribute("aria-busy", "false");
   } catch (e) {
     if (navigator.onLine) {
-      st.textContent = "同期失敗 - 再接続を試行中";
-      st.setAttribute("aria-busy", "false");
+      setStatusText("同期失敗 - 再接続を試行中");
+      if (st) st.setAttribute("aria-busy", "false");
     }
   }
   return false;
@@ -320,69 +390,61 @@ async function syncState() {
 function setupEventSource() {
   const es = new EventSource("/api/events");
   es.onopen = async () => {
-    if (!(await syncState())) {
-      st.textContent = "接続済み - 準備OK";
-      st.className = "status ready";
-      st.setAttribute("aria-busy", "false");
+    const ok = await syncState();
+    if (!ok) {
+      setStatusText("接続済み - 準備OK");
+      st?.classList.remove("running", "lucky");
+      st?.classList.add("ready");
+      if (st) st.setAttribute("aria-busy", "false");
     }
+    hideLoading();
   };
   es.onerror = () => {
-    st.textContent = "再接続中...";
-    st.className = "status";
-    st.setAttribute("aria-busy", "true");
+    setStatusText("再接続中...");
+    st?.classList.remove("ready", "running", "lucky");
+    if (st) st.setAttribute("aria-busy", "true");
     syncState();
   };
   es.addEventListener("lucky_chance", (e) => {
     try {
       const d = JSON.parse(e.data || "{}");
       setUIFromState({ ...d, running: false, lucky: true });
-      sb.disabled = false;
-      sb.textContent = "▶ 再開";
-      sp.disabled = true;
+      if (sb) { sb.disabled = false; sb.textContent = "▶ 再開"; }
+      if (sp) sp.disabled = true;
       if (Notification.permission === "granted") {
         new Notification("あるけみすと", { body: "ラッキーチャンス！" });
       }
-    } catch (err) {
-      console.error("lucky_chance parse error:", err);
-    }
+    } catch (err) { console.error("lucky_chance parse error:", err); }
   });
   es.addEventListener("exploration_started", (e) => {
     try {
       const d = JSON.parse(e.data || "{}");
       setUIFromState({ ...d, running: true, lucky: false });
-      sb.disabled = true;
-      sp.disabled = false;
-    } catch (err) {
-      console.error("exploration_started parse error:", err);
-    }
+      if (sb) sb.disabled = true;
+      if (sp) sp.disabled = false;
+    } catch (err) { console.error("exploration_started parse error:", err); }
   });
   es.addEventListener("exploration_stopped", (e) => {
     goPending = false;
     try {
       const d = JSON.parse(e.data || "{}");
       setUIFromState({ ...d, running: false, lucky: false });
-      sb.disabled = false;
-      sp.disabled = true;
-    } catch (err) {
-      console.error("exploration_stopped parse error:", err);
-    }
+      if (sb) sb.disabled = false;
+      if (sp) sp.disabled = true;
+    } catch (err) { console.error("exploration_stopped parse error:", err); }
   });
   es.addEventListener("exploration_log", (e) => {
-    try {
-      setUIFromState(JSON.parse(e.data || "{}"));
-    } catch (err) {
-      console.error("exploration_log parse error:", err);
-    }
+    try { setUIFromState(JSON.parse(e.data || "{}")); } catch (err) { console.error("exploration_log parse error:", err); }
   });
 }
 
 function setupStartBtn() {
-  sb.addEventListener("click", async () => {
+  sb?.addEventListener("click", async () => {
     if (sb.disabled) return;
     sb.disabled = true;
     goPending = true;
     clientStartMs = Date.now();
-    sp.disabled = false;
+    if (sp) sp.disabled = false;
     if (timerId) clearInterval(timerId);
     timerId = setInterval(() => {
       if (statTime) statTime.textContent = fmtElapsed(Date.now() - clientStartMs);
@@ -390,73 +452,58 @@ function setupStartBtn() {
     if (statTime) statTime.textContent = fmtElapsed(0);
     try {
       const r = await fetch("/api/go", { method: "POST" });
-      if (r.ok) {
-        st.textContent = "送信完了 - 探索開始を待機中";
-      } else {
-        throw new Error("HTTP " + r.status);
-      }
+      if (r.ok) setStatusText("送信完了 - 探索開始を待機中");
+      else throw new Error("HTTP " + r.status);
     } catch (e) {
       sb.disabled = false;
       goPending = false;
       clientStartMs = null;
-      if (timerId) {
-        clearInterval(timerId);
-        timerId = null;
-      }
-      st.textContent = "接続エラー - サーバーを確認してください";
-      st.setAttribute("aria-busy", "false");
+      if (timerId) { clearInterval(timerId); timerId = null; }
+      setStatusText("接続エラー - サーバーを確認してください");
+      if (st) st.setAttribute("aria-busy", "false");
     }
   });
 }
 
 function setupStopBtn() {
-  sp.addEventListener("click", async () => {
+  sp?.addEventListener("click", async () => {
     if (sp.disabled) return;
     try {
       const r = await fetch("/api/stop-exploration", { method: "POST" });
-      if (r.ok) {
-        st.textContent = "停止予約 - このループ終了後に停止します";
-      } else {
-        throw new Error("HTTP " + r.status);
-      }
+      if (r.ok) setStatusText("停止予約 - このループ終了後に停止します");
+      else throw new Error("HTTP " + r.status);
     } catch (e) {
-      st.textContent = "接続エラー - 停止できませんでした";
-      st.setAttribute("aria-busy", "false");
+      setStatusText("接続エラー - 停止できませんでした");
+      if (st) st.setAttribute("aria-busy", "false");
     }
   });
 }
 
-// ドロップソート・フィルタ
 function setupDropControls() {
-  if (sortDropsBtn) {
-    sortDropsBtn.addEventListener("click", () => {
-      dropsSortOrder =
-        dropsSortOrder === "default"
-          ? "rank-desc"
-          : dropsSortOrder === "rank-desc"
-            ? "rank-asc"
-            : "default";
-      setUIFromState(lastState);
-    });
-  }
-  if (dropFilter) {
-    dropFilter.addEventListener("change", () => setUIFromState(lastState));
-  }
+  sortDropsBtn?.addEventListener("click", () => {
+    dropsSortOrder = dropsSortOrder === "default" ? "rank-desc" : dropsSortOrder === "rank-desc" ? "rank-asc" : "default";
+    setUIFromState(lastState);
+  });
+  dropFilter?.addEventListener("change", () => setUIFromState(lastState));
 }
 
-// キーボード
 function setupKeyboard() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.repeat) {
       if (sb && !sb.disabled) sb.click();
     }
     if (e.key === "Escape" && !e.repeat) {
-      if (sp && !sp.disabled) sp.click();
+      if (helpModal && !helpModal.hidden) closeHelp();
+      else if (sp && !sp.disabled) sp.click();
     }
     if (e.key === "t" || e.key === "T") {
       if (e.ctrlKey || e.metaKey) return;
       if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
       toggleTheme();
+    }
+    if (e.key === "?") {
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") return;
+      openHelp();
     }
   });
 }
@@ -464,26 +511,47 @@ function setupKeyboard() {
 // 初期化
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
-  tb.addEventListener("click", toggleTheme);
+  tb?.addEventListener("click", toggleTheme);
+  helpBtn?.addEventListener("click", openHelp);
+  helpClose?.addEventListener("click", closeHelp);
+  helpModal?.querySelector(".modal-backdrop")?.addEventListener("click", closeHelp);
+  const luckySoundCb = $("#luckySoundToggle");
+  if (luckySoundCb) {
+    luckySoundCb.checked = luckySoundEnabled;
+    luckySoundCb.addEventListener("change", () => {
+      luckySoundEnabled = luckySoundCb.checked;
+      localStorage.luckySound = luckySoundEnabled ? "1" : "0";
+    });
+  }
   setupTabs();
   switchTab("dashboard");
   setupDropControls();
   setupKeyboard();
 
+  if (loadingOverlay) {
+    loadingOverlay.style.display = "block";
+    setTimeout(hideLoading, 5000);
+  }
+
   window.addEventListener("online", () => {
-    off.style.display = "none";
+    if (off) off.style.display = "none";
+    wasOffline = true;
   });
   window.addEventListener("offline", () => {
-    off.style.display = "block";
-    st.textContent = "オフライン";
-    st.setAttribute("aria-busy", "false");
+    if (off) off.style.display = "block";
+    setStatusText("オフライン");
+    if (st) st.setAttribute("aria-busy", "false");
   });
+
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
 
   syncState();
   setInterval(syncState, SYNC_INTERVAL_MS);
+  setInterval(() => {
+    if (lastSyncEl && lastSyncAt) lastSyncEl.textContent = "最終更新: " + fmtLastSync(lastSyncAt);
+  }, 10000);
   setupEventSource();
   setupStartBtn();
   setupStopBtn();
