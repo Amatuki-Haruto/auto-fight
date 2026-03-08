@@ -1,227 +1,122 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>あるけみすと 自動探索</title>
-<style>
-:root{
-  --bg:#0d1117;
-  --bg2:#161b22;
-  --card:#21262d;
-  --border:#30363d;
-  --text:#e6edf3;
-  --muted:#8b949e;
-  --accent:#f0883e;
-  --accent2:#58a6ff;
-  --success:#3fb950;
-  --danger:#f85149;
-  --radius:12px;
-  --shadow:0 8px 32px rgba(0,0,0,.5);
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Hiragino Sans','Yu Gothic',Meiryo,sans-serif;background:linear-gradient(135deg,#0d1117 0%,#161b22 50%,#0d1117 100%);color:var(--text);min-height:100vh;line-height:1.6}
-main{max-width:480px;margin:0 auto;padding:1.5rem 1rem}
-h1{font-size:1.5rem;font-weight:700;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
-h1 .icon{font-size:1.8rem}
-.theme-btn{position:fixed;top:1rem;right:1rem;width:44px;height:44px;border-radius:12px;background:var(--card);border:1px solid var(--border);cursor:pointer;font-size:1.2rem;transition:transform .15s;z-index:10}
-.theme-btn:hover{transform:scale(1.08)}
-.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow)}
-.card h2{font-size:.9rem;color:var(--muted);margin-bottom:.75rem;font-weight:600}
-.status{display:flex;align-items:center;gap:.6rem;padding:.9rem 1rem;background:rgba(255,255,255,.03);border-radius:10px;font-size:.95rem;font-weight:500}
-.status::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--muted);animation:pulse 2s infinite}
-.status.ready::before{background:var(--success)}
-.status.running::before{background:var(--accent2);box-shadow:0 0 12px var(--accent2)}
-.status.lucky::before{background:var(--accent);animation:pulse .8s infinite;box-shadow:0 0 12px var(--accent)}
-.status.lucky{box-shadow:0 0 0 2px rgba(240,136,62,.4)}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-top:1rem}
-.stat{background:rgba(0,0,0,.25);border-radius:10px;padding:1rem;text-align:center}
-.stat .val{font-size:1.8rem;font-weight:700;color:var(--accent2)}
-.stat .label{font-size:.75rem;color:var(--muted);margin-top:.2rem}
-.btns{display:flex;gap:.6rem;margin-top:1rem;flex-wrap:wrap}
-.btn{flex:1;min-width:130px;padding:.9rem 1.1rem;font-size:.95rem;font-weight:600;border:none;border-radius:10px;cursor:pointer;transition:transform .15s,box-shadow .15s;font-family:inherit}
-.btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
-.btn-start{background:linear-gradient(135deg,var(--accent),#c76d2e);color:#fff}
-.btn-start:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 6px 20px rgba(240,136,62,.4)}
-.btn-stop{background:linear-gradient(135deg,var(--danger),#c0392b);color:#fff}
-.btn-stop:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 6px 20px rgba(248,81,73,.4)}
-.btn-link{background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--accent2);text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
-.btn-link:hover{background:rgba(88,166,255,.15)}
-.drop-ranks{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem}
-.drop-ranks span{font-size:.8rem;padding:.3em .6em;border-radius:6px}
-.drop-ranks .S{background:linear-gradient(135deg,#ffd700,#ffb700);color:#333}
-.drop-ranks .A{background:linear-gradient(135deg,#c0c0c0,#a0a0a0);color:#333}
-.drop-ranks .B{background:linear-gradient(135deg,#58a6ff,#3d8bf0);color:#fff}
-.drop-ranks .C{background:rgba(255,255,255,.12);color:var(--text)}
-.drops-list{font-size:.8rem;margin-top:.75rem;max-height:100px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:.4rem}
-.drops-list span{display:inline-block;padding:.35em .6em;border-radius:6px;font-size:.85em}
-.activity{font-size:.8rem;color:var(--muted);margin-top:1rem}
-.activity-item{display:flex;flex-direction:column;gap:.3rem;padding:.6rem;background:rgba(0,0,0,.2);border-radius:8px;margin-bottom:.5rem;border-left:3px solid var(--accent2);animation:fadeIn .3s}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.activity-item .loop{color:var(--accent2);font-weight:600}
-.activity-item .msg{word-break:break-word;font-size:.9rem}
-.activity-item .drops{font-size:.75rem;margin-top:.2em}
-.activity-item .drops span{margin-right:.3em}
-.steps{font-size:.8rem;color:var(--muted);margin-top:1rem;line-height:2}
-.steps summary{cursor:pointer;font-weight:500}
-.steps code{background:rgba(255,255,255,.08);padding:.2em .5em;border-radius:4px}
-.offline{color:var(--danger);font-size:.8rem;margin-top:.5rem}
-[data-theme="light"]{--bg:#f0f2f5;--bg2:#fff}
-[data-theme="light"] body{background:linear-gradient(135deg,#f6f8fa 0%,#eaeef2 50%,#f6f8fa 100%)}
-[data-theme="light"] .card{background:#fff;border-color:#d0d7de}
-[data-theme="light"] .stat{background:#f6f8fa}
-[data-theme="light"] .drop-ranks .C{background:#eaeef2;color:#1f2328}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>あるけみすと 自動探索</title>
+  <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-<button class="theme-btn" id="themeBtn" title="テーマ切替" aria-label="テーマ切替">🌙</button>
-<main>
-<h1><span class="icon">⚔️</span> あるけみすと 自動探索</h1>
+  <div class="app-wrap">
+    <header class="header">
+      <h1><span class="icon">⚔️</span> あるけみすと 自動探索</h1>
+      <button class="theme-btn" id="themeBtn" title="テーマ切替 (T)" aria-label="テーマ切替">🌙</button>
+    </header>
 
-<div class="card">
-<div class="status" id="status">接続中...</div>
-<div id="stopReason" class="offline" style="display:none;margin-top:.5rem"></div>
-<div id="offlineMsg" class="offline" style="display:none">オフラインです</div>
+    <div class="status-bar" id="statusBar">
+      <div class="status" id="status" role="status" aria-live="polite" aria-busy="true">接続中...</div>
+      <div id="stopReason" class="stop-reason-box" style="display:none" role="alert"></div>
+      <div id="offlineMsg" class="offline" style="display:none" role="alert">
+        オフラインです。ネットワーク回復後に自動で再接続します。
+      </div>
+    </div>
 
-<div class="stats">
-<div class="stat"><div class="val" id="statLoop">0</div><div class="label">周回数</div></div>
-<div class="stat"><div class="val" id="statTime">--:--</div><div class="label">経過時間</div></div>
-<div class="stat"><div class="val" id="statExp">0</div><div class="label">獲得経験値</div></div>
-<div class="stat"><div class="val" id="statDrops">0</div><div class="label">ドロップ数</div></div>
-</div>
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab active" data-tab="dashboard" role="tab" aria-selected="true">📊 状況</button>
+      <button type="button" class="tab" data-tab="drops" role="tab">🏆 ドロップ</button>
+      <button type="button" class="tab" data-tab="activity" role="tab">📜 ログ</button>
+      <button type="button" class="tab" data-tab="stats" role="tab">📈 統計</button>
+    </nav>
 
-<div class="btns">
-<button type="button" class="btn btn-start" id="startBtn">▶ 自動探索開始</button>
-<button type="button" class="btn btn-stop" id="stopBtn" disabled>■ 停止</button>
-<a href="https://games-alchemist.com/" target="_blank" rel="noopener" class="btn btn-link">🎮 ゲームを開く</a>
-</div>
-</div>
+    <main class="main">
+      <!-- タブ: 状況 -->
+      <section id="tab-dashboard" class="tab-panel active" role="tabpanel">
+        <div class="stats-grid">
+          <div class="stat">
+            <div class="val" id="statLevel">-</div>
+            <div class="label">レベル</div>
+          </div>
+          <div class="stat">
+            <div class="val count-up" id="statLoop">0</div>
+            <div class="label">周回数</div>
+          </div>
+          <div class="stat">
+            <div class="val" id="statTime">--:--</div>
+            <div class="label">経過時間</div>
+          </div>
+          <div class="stat">
+            <div class="val" id="statExp">0</div>
+            <div class="label">獲得経験値</div>
+          </div>
+          <div class="stat">
+            <div class="val" id="statExpPerLoop">-</div>
+            <div class="label">1周あたりEXP</div>
+          </div>
+          <div class="stat">
+            <div class="val" id="statDrops">0</div>
+            <div class="label">ドロップ数</div>
+          </div>
+        </div>
+        <div class="btns">
+          <button type="button" class="btn btn-start" id="startBtn" aria-label="自動探索開始 (Enter)">▶ 自動探索開始</button>
+          <button type="button" class="btn btn-stop" id="stopBtn" disabled aria-label="停止 (Esc)">■ 停止</button>
+          <a href="https://games-alchemist.com/home/" target="_blank" rel="noopener" class="btn btn-link">🎮 ゲームを開く</a>
+        </div>
+        <div class="last-result card">
+          <h2>📋 直近の結果</h2>
+          <div id="lastMessage" class="activity-item" style="display:none">
+            <span class="loop" id="loopCount"></span>
+            <span class="msg" id="lastMsgText"></span>
+            <div class="drops" id="lastMsgDrops"></div>
+          </div>
+          <p id="noResult" class="muted">まだ探索結果がありません</p>
+        </div>
+      </section>
 
-<div class="card">
-<h2>📋 直近の結果</h2>
-<div id="lastMessage" class="activity-item" style="display:none">
-<span class="loop" id="loopCount"></span>
-<span class="msg" id="lastMsgText"></span>
-<div class="drops" id="lastMsgDrops"></div>
-</div>
-<p id="noResult" style="color:var(--muted);font-size:.9rem">まだ探索結果がありません</p>
+      <!-- タブ: ドロップ -->
+      <section id="tab-drops" class="tab-panel" role="tabpanel">
+        <div class="drop-controls">
+          <div class="drop-ranks" id="dropRanks"><span class="C">まだなし</span></div>
+          <div class="filter-row">
+            <span class="filter-label">フィルタ:</span>
+            <select id="dropFilter" title="ランクでフィルタ">
+              <option value="">全ランク</option>
+              <option value="S">Sのみ</option>
+              <option value="A">Aのみ</option>
+              <option value="B">Bのみ</option>
+              <option value="C">Cのみ</option>
+              <option value="D">Dのみ</option>
+              <option value="E">Eのみ</option>
+              <option value="F">Fのみ</option>
+            </select>
+            <button type="button" class="sort-btn" id="sortDropsBtn">並び替え</button>
+          </div>
+        </div>
+        <div class="drops-list" id="dropsList"></div>
+      </section>
 
-<h2 style="margin-top:1rem">🏆 ドロップ（ランク別）</h2>
-<div class="drop-ranks" id="dropRanks"></div>
-<div class="drops-list" id="dropsList"></div>
-</div>
+      <!-- タブ: アクティビティ -->
+      <section id="tab-activity" class="tab-panel" role="tabpanel">
+        <h2>📜 アクティビティログ</h2>
+        <div class="activity" id="activityLog"></div>
+      </section>
 
-<div class="card">
-<h2>📜 アクティビティ</h2>
-<div class="activity" id="activityLog"></div>
-</div>
+      <!-- タブ: 統計 -->
+      <section id="tab-stats" class="tab-panel" role="tabpanel">
+        <h2>📈 経験値推移</h2>
+        <div class="chart-container" id="expChart"></div>
+        <div class="stats-summary" id="statsSummary"></div>
+        <details class="steps">
+          <summary>🚀 起動手順</summary>
+          <p>1. <code>python3 auto_click.py</code> を実行<br>
+          2. Braveでゲームにログイン<br>
+          3. 「自動探索開始」を押す（または Enter キー）</p>
+          <p class="kbd-hint">💡 Enter: 開始 / Esc: 停止</p>
+        </details>
+      </section>
+    </main>
+  </div>
 
-<div class="card">
-<details class="steps">
-<summary>🚀 起動手順</summary>
-<p style="margin-top:.75rem">1. <code>python3 auto_click.py</code> を実行<br>
-2. Braveでゲームにログイン<br>
-3. 「自動探索開始」を押す</p>
-</details>
-</div>
-</main>
-
-<script>
-const $=e=>document.querySelector(e),st=$('#status'),sb=$('#startBtn'),sp=$('#stopBtn'),tb=$('#themeBtn');
-const statLoop=$('#statLoop'),statTime=$('#statTime'),statExp=$('#statExp'),statDrops=$('#statDrops');
-const lastMsg=$('#lastMessage'),lastMsgText=$('#lastMsgText'),lastMsgDrops=$('#lastMsgDrops'),noResult=$('#noResult');
-const dropRanks=$('#dropRanks'),dropsList=$('#dropsList'),activityLog=$('#activityLog'),off=$('#offlineMsg');
-
-let clientStartMs=null,timerId=null,goPending=false;
-
-const saved=localStorage.theme;
-const prefersLight=window.matchMedia('(prefers-color-scheme:light)').matches;
-if(saved==='light'||(!saved&&prefersLight)){document.documentElement.setAttribute('data-theme','light');tb.textContent='☀️'}
-tb.onclick=()=>{const d=document.documentElement;if(d.dataset.theme){d.removeAttribute('data-theme');tb.textContent='🌙';localStorage.theme=''}else{d.dataset.theme='light';tb.textContent='☀️';localStorage.theme='light'}}
-
-window.addEventListener('online',()=>{off.style.display='none'});
-window.addEventListener('offline',()=>{off.style.display='block';st.textContent='オフライン'});
-if('Notification'in window&&Notification.permission==='default')Notification.requestPermission();
-
-function fmtElapsed(ms){
-  if(ms==null||ms<0)return'--:--';
-  const s=Math.floor(ms/1000);
-  const m=Math.floor(s/60),h=Math.floor(m/60);
-  if(h>0)return h+'時間'+String(m%60).padStart(2,'0')+'分';
-  return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0');
-}
-
-function escapeHtml(s){
-  if(typeof s!=='string')return'';
-  const div=document.createElement('div');
-  div.textContent=s;
-  return div.innerHTML;
-}
-
-function rankClass(s){
-  const m=s.match(/^\[([A-Z])\]/);
-  return m?m[1]:'?';
-}
-
-function renderDropTag(d){
-  const c=rankClass(d);
-  return'<span class="'+c+'">'+escapeHtml(d)+'</span>';
-}
-
-const stopReasonEl=$('#stopReason');
-function setUIFromState(d){
-  const run=d.running,lucky=d.lucky;
-  if(d.stop_reason){stopReasonEl.style.display='block';stopReasonEl.textContent='⚠ '+d.stop_reason;stopReasonEl.style.color='var(--danger)'}
-  else{stopReasonEl.style.display='none'}
-  const waitSec=d.lucky_chance_wait_sec||20;
-  if(lucky){st.textContent='★ 一時停止（ラッキーチャンス） 「再開」で'+waitSec+'秒後に開始';st.className='status lucky';sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=false}
-  else if(run){st.textContent='探索実行中';st.className='status running';sb.disabled=true;sb.textContent='▶ 自動探索開始';sp.disabled=false}
-  else{st.textContent='停止済み - 「開始」で再開';st.className='status ready';sb.disabled=false;sp.disabled=true;sp.setAttribute('disabled','')}
-
-  statLoop.textContent=d.loop_count||0;
-  statExp.textContent=(d.total_exp||0).toLocaleString();
-  statDrops.textContent=(d.drops||[]).length;
-
-  if(!run&&!goPending){clientStartMs=null;if(timerId){clearInterval(timerId);timerId=null}}
-  else if(run){goPending=false;if(clientStartMs==null&&d.session_started_at)clientStartMs=new Date(d.session_started_at).getTime()}
-  if(timerId)clearInterval(timerId);
-  if(clientStartMs!=null)timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),TIMER_INTERVAL_MS);
-  statTime.textContent=fmtElapsed(clientStartMs!=null?Date.now()-clientStartMs:null);
-
-  const byRank=d.drops_by_rank||{};
-  dropRanks.innerHTML=['S','A','B','C'].filter(r=>byRank[r]).map(r=>'<span class="'+r+'">'+r+': '+byRank[r]+'</span>').join('')||'<span class="C">まだなし</span>';
-
-  dropsList.innerHTML=(d.drops||[]).map(renderDropTag).join('')||'';
-
-  const acts=d.activity_log||[];
-  const lastAct=acts[0];
-  if(d.last_message&&lastAct){noResult.style.display='none';lastMsg.style.display='flex';$('#loopCount').textContent='#'+lastAct.loop+'周目';lastMsgText.textContent=d.last_message;lastMsgDrops.innerHTML=(lastAct.drops||[]).map(renderDropTag).join('')}
-  else if(d.last_message){noResult.style.display='none';lastMsg.style.display='flex';$('#loopCount').textContent='';lastMsgText.textContent=d.last_message;lastMsgDrops.innerHTML=''}
-  else{noResult.style.display='block';lastMsg.style.display='none'}
-
-  activityLog.innerHTML=(d.activity_log||[]).slice(0,10).map(a=>'<div class="activity-item"><span class="loop">#'+escapeHtml(String(a.loop))+'</span><span class="msg">'+escapeHtml(a.msg||'')+'</span><div class="drops">'+(a.drops||[]).map(renderDropTag).join('')+'</div></div>').join('')||'<p style="color:var(--muted)">まだアクティビティがありません</p>';
-}
-
-const SYNC_INTERVAL_MS=5000,TIMER_INTERVAL_MS=1000;
-async function syncState(){
-  try{const r=await fetch('/api/state');if(r.ok){const d=await r.json();setUIFromState(d);return true}else if(!navigator.onLine){return false}}
-  catch(e){if(navigator.onLine)st.textContent='同期失敗 - 再接続を試行中'}
-  return false;
-}
-syncState();
-setInterval(syncState,SYNC_INTERVAL_MS);
-
-const es=new EventSource('/api/events');
-es.onopen=async()=>{if(!await syncState()){st.textContent='接続済み - 準備OK';st.className='status ready'}}
-es.onerror=()=>{st.textContent='再接続中...';st.className='status';syncState()}
-es.addEventListener('lucky_chance',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:true});sb.disabled=false;sb.textContent='▶ 再開';sp.disabled=true;if(Notification.permission==='granted')new Notification('あるけみすと',{body:'ラッキーチャンス！'})})
-es.addEventListener('exploration_started',e=>{const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:true,lucky:false});sb.disabled=true;sp.disabled=false})
-es.addEventListener('exploration_stopped',e=>{goPending=false;const d=JSON.parse(e.data||'{}');setUIFromState({...d,running:false,lucky:false});sb.disabled=false;sp.disabled=true})
-es.addEventListener('exploration_log',e=>{try{setUIFromState(JSON.parse(e.data||'{}'))}catch(_){}})
-
-sb.onclick=async()=>{if(sb.disabled)return;sb.disabled=true;goPending=true;clientStartMs=Date.now();sp.disabled=false;if(timerId)clearInterval(timerId);timerId=setInterval(()=>statTime.textContent=fmtElapsed(Date.now()-clientStartMs),TIMER_INTERVAL_MS);statTime.textContent=fmtElapsed(0);try{await fetch('/api/go',{method:'POST'});st.textContent='送信完了 - 探索開始を待機中'}catch(e){sb.disabled=false;goPending=false;clientStartMs=null;if(timerId){clearInterval(timerId);timerId=null};st.textContent='接続エラー - サーバーを確認してください'}}
-sp.onclick=async()=>{if(sp.disabled)return;try{await fetch('/api/stop-exploration',{method:'POST'});st.textContent='停止予約 - このループ終了後に停止します'}catch(e){st.textContent='接続エラー - 停止できませんでした'}}
-</script>
+  <script src="/static/js/main.js" defer></script>
 </body>
 </html>

@@ -64,6 +64,9 @@ python run_auto_click.py
 |------|------|
 | `BACKEND_URL` | Web サーバー URL（例: https://xxx.onrender.com） |
 | `WAIT_PRESET` | 待機時間: `fast` / `normal` / `slow` |
+| `BACKEND_OPTIONAL` | `1` で Web サーバー未接続時も探索のみ続行 |
+| `CONSECUTIVE_ERROR_THRESHOLD` | 連続エラー警告の閾値（デフォルト: 5） |
+| `LUCKY_CHANCE_MAX_WAIT_SEC` | ラッキーチャンス再開待ちの最大秒数（デフォルト: 1800） |
 
 ---
 
