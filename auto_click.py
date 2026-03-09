@@ -888,7 +888,7 @@ async def run_loop(
         base = config.BACKEND_URL.rstrip("/")
         backend_connected = True
         try:
-            r = await client.get(f"{base}/health", timeout=2.0)
+            r = await client.get(f"{base}/health", timeout=config.BACKEND_HEALTH_TIMEOUT)
             if r.status_code == 200:
                 backend_connected = True
         except (httpx.ConnectError, httpx.TimeoutException):

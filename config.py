@@ -41,6 +41,8 @@ def _get_bool(key: str, default: bool = False) -> bool:
 
 # Web通知サーバー
 BACKEND_URL: str = os.environ.get("BACKEND_URL", "http://localhost:8000")
+# 接続確認（/health）のタイムアウト秒。Render スリープ起動時は 60 秒程度必要
+BACKEND_HEALTH_TIMEOUT: float = max(2.0, _get_float("BACKEND_HEALTH_TIMEOUT", 60.0))
 
 # URL
 HOME_URL: str = "https://games-alchemist.com/home/"
@@ -59,7 +61,7 @@ BRAVE_PATH: str = os.environ.get(
 
 # 待機時間（秒）- プリセット: fast, normal, slow（1周あたり約20〜23秒を想定）
 _WAIT_PRESET: dict[str, dict[str, tuple[float, float]]] = {
-    "fast": {"start": (0.1, 0.3), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (0.5, 1.5)},
+    "fast": {"start": (0.1, 0.3), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (1.5, 2.5)},
     "normal": {"start": (0.15, 0.4), "home_scroll": (0.1, 0.3), "monster_scroll": (0.1, 0.3), "return": (2.5, 5.5)},
     "slow": {"start": (0.2, 0.5), "home_scroll": (0.15, 0.4), "monster_scroll": (0.15, 0.4), "return": (3.0, 6.0)},
 }
@@ -155,13 +157,6 @@ SAFE_GOTO_HOME_RETRIES: int = max(1, _get_int("SAFE_GOTO_HOME_RETRIES", 3))
 # Webサーバー未接続時も探索のみ続行するか
 BACKEND_OPTIONAL: bool = _get_bool("BACKEND_OPTIONAL", True)
 
-# myshop 自動取得（環境変数 MYSHOP_AUTO_FETCH=1 で有効）
-MYSHOP_AUTO_FETCH: bool = _get_bool("MYSHOP_AUTO_FETCH", False)
-# 実行時刻の分（カンマ区切り）。例: "15,45" → 毎時 1:15, 1:45, 2:15, 2:45 ...
-MYSHOP_FETCH_MINUTES: list[int] = [
-    int(m.strip()) for m in os.environ.get("MYSHOP_FETCH_MINUTES", "15,45").split(",") if m.strip().isdigit()
-] or [15, 45]
-
 # CORS（カンマ区切り、* で全許可）
 _cors_raw: str = os.environ.get("CORS_ORIGINS", "*")
 CORS_ORIGINS: list[str] = ["*"] if _cors_raw.strip() == "*" else [o.strip() for o in _cors_raw.split(",") if o.strip()]
@@ -174,6 +169,7 @@ __all__ = [
     "CORS_ORIGINS",
     "BACKEND_OPTIONAL",
     "BACKEND_URL",
+    "BACKEND_HEALTH_TIMEOUT",
     "BRAVE_PATH",
     "BUTTON_TIMEOUT_MS",
     "CHALLENGE_ARENA",
@@ -202,8 +198,6 @@ __all__ = [
     "URL_AFTER_EXPLORE",
     "USER_AGENT",
     "USER_DATA_DIR",
-    "MYSHOP_AUTO_FETCH",
-    "MYSHOP_FETCH_MINUTES",
     "VERBOSE",
     "VIEWPORT_OPTIONS",
     "WAIT_AFTER_CLICK",

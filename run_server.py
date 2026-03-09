@@ -13,6 +13,6 @@ if __name__ == "__main__":
         "app:app",
         host="0.0.0.0",
         port=port,
-        workers=1 if not reload else 1,
+        workers=1,
         reload=reload,
     )
